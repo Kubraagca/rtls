@@ -1,0 +1,533 @@
+'use client';
+
+import { useId } from 'react';
+import { useRoomEditor } from '../contexts';
+import { useSelection } from '../contexts';
+import { CCTV_MODELS, getCctvModel } from '../lib/cctv-models';
+import { Icon, iconForItem, type PlotcraftIconName } from '../plotcraft/icon';
+import { COLOR_SWATCHES, ColorSwatchPicker } from './color-swatch-picker';
+import { SliderRow } from './slider-row';
+import type { SofaShape } from '../lib/types';
+
+type ResizableDimension = 'width' | 'depth' | 'height';
+
+interface DimensionConfig {
+  label: string;
+  key: ResizableDimension;
+  min: number;
+  max: number;
+}
+
+const DIMENSIONS: readonly DimensionConfig[] = [
+  { label: 'W', key: 'width',  min: 0.1, max: 5 },
+  { label: 'D', key: 'depth',  min: 0.1, max: 5 },
+  { label: 'H', key: 'height', min: 0.1, max: 3 },
+];
+
+export interface ItemContextPopoverProps {
+  hasCollision: boolean;
+  onRemove(id: string): void;
+  onDuplicate(id: string): void;
+  onRotate(id: string): void;
+  onToggleCameraBracket(id: string): void;
+  onClose(): void;
+}
+
+export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element {
+  const { actions, recentColors, pushColor } = useRoomEditor();
+  const { selectedItem: item } = useSelection();
+  if (!item) return <></>;
+  const { onClose } = props;
+  return (
+    <div
+      className="pc-glass pc-glass--dark pc-item-popover"
+      role="dialog"
+          aria-label={`${item.name} düzenle`}
+      style={{
+        position: 'absolute',
+        top: 130,
+        right: 16,
+        width: 296,
+        padding: 0,
+        overflow: 'hidden',
+        zIndex: 28,
+      }}
+    >
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          padding: '10px 12px',
+          borderBottom: '1px solid var(--pc-glass-inner)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div
+            style={{
+              height: 32,
+              width: 32,
+              borderRadius: 10,
+              background: 'rgba(127,243,255,0.18)',
+              border: '1px solid var(--pc-cyan-glow)',
+              display: 'grid',
+              placeItems: 'center',
+              color: 'var(--pc-cyan-glow)',
+              boxShadow: 'var(--pc-halo-cyan-soft)',
+            }}
+            aria-hidden
+          >
+            <Icon name={iconForItem(item.type, item.category)} size={18} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <p
+              className="pc-body"
+              style={{
+                margin: 0,
+                fontWeight: 700,
+                fontFamily: 'var(--pc-font-display)',
+                fontSize: 14,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {item.name}
+            </p>
+            {item.type === 'security-camera' ? (
+              <p
+                className="pc-blurb"
+                style={{ margin: 0, fontSize: 10, color: 'var(--pc-cyan-glow)' }}
+              >
+                {(() => {
+                  const model = getCctvModel(item.cctvModelId);
+                  return model ? `${model.brand} ${model.model}` : 'Custom camera';
+                })()}
+              </p>
+            ) : (
+              item.position && (
+                <p
+                  className="pc-blurb"
+                  style={{
+                    margin: 0,
+                    fontSize: 10,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  }}
+                >
+                  ({item.position.x.toFixed(2)}, {item.position.z.toFixed(2)})
+                </p>
+              )
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Kapat"
+          title="Kapat"
+          className="pc-tile"
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icon name="close" size={14} />
+        </button>
+      </header>
+
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto' }}>
+        {props.hasCollision && (
+          <div
+            className="pc-body"
+            style={{
+              fontSize: 11,
+              color: 'var(--pc-paper)',
+              background: 'rgba(228,82,72,0.18)',
+              border: '1px solid var(--pc-demolish)',
+              borderRadius: 8,
+              padding: '6px 8px',
+            }}
+          >
+            Overlaps another item or escapes the room.
+          </div>
+        )}
+
+        {item.type === 'security-camera' && (
+          <CameraModelCard
+            modelId={item.cctvModelId ?? ''}
+            fov={item.visionFov ?? 70}
+            range={item.visionRange ?? 7}
+            onPickModel={(modelId) => {
+              const model = getCctvModel(modelId);
+              if (model) {
+                actions.updateItem(item.id, {
+                  cctvModelId: model.id,
+                  visionFov: model.fov,
+                  visionRange: model.range,
+                });
+              } else {
+                actions.updateItem(item.id, { cctvModelId: '' });
+              }
+            }}
+            onSetFov={(value) => actions.updateItem(item.id, { visionFov: value, cctvModelId: '' })}
+            onSetRange={(value) => actions.updateItem(item.id, { visionRange: value, cctvModelId: '' })}
+          />
+        )}
+
+        {item.type === 'security-camera' && (
+          <button
+            type="button"
+            onClick={() => props.onToggleCameraBracket(item.id)}
+            aria-pressed={item.cameraBracket === true}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              padding: '8px 10px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: item.cameraBracket ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.04)',
+              color: 'inherit',
+              textAlign: 'left',
+              font: 'inherit',
+            }}
+          >
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Stand-off bracket</span>
+              <span style={{ fontSize: 10.5, opacity: 0.7 }}>
+                {item.cameraBracket
+                  ? 'On its arm — pan left/right freely'
+                  : 'Flush mount — Rotate flips in/out only'}
+              </span>
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.9 }}>
+              {item.cameraBracket ? 'ON' : 'OFF'}
+            </span>
+          </button>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+          <ActionTile icon="rotate" label="Döndür" onClick={() => props.onRotate(item.id)} />
+          <ActionTile
+            icon="mirror"
+            label="Aynala"
+            active={item.mirrored}
+            onClick={() => actions.toggleMirror(item.id)}
+          />
+          <ActionTile
+            icon={item.locked ? 'lock' : 'unlock'}
+            label={item.locked ? 'Kilidi aç' : 'Kilitle'}
+            active={item.locked}
+            onClick={() => actions.setLocked(item.id, !item.locked)}
+          />
+          <ActionTile icon="copy" label="Kopyala" onClick={() => props.onDuplicate(item.id)} />
+          <ActionTile icon="target" label="Ortala" onClick={() => actions.moveItem(item.id, 0, 0)} />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {DIMENSIONS.map((dimension) => (
+            <SliderRow
+              key={dimension.key}
+              label={dimension.label}
+              min={dimension.min}
+              max={dimension.max}
+              step={0.1}
+              value={item[dimension.key]}
+              format={(v) => `${v.toFixed(2)} m`}
+              onChange={(value) => actions.resizeItem(item.id, dimension.key, value)}
+              labelWidth={14}
+              uppercaseLabel={false}
+            />
+          ))}
+        </div>
+
+        {item.type === 'sofa' && (
+          <SofaShapeSegmented
+            value={item.sofaShape ?? 'standard'}
+            onChange={(shape) => actions.setSofaShape(item.id, shape)}
+          />
+        )}
+
+        {(item.isWiFiAccessPoint || item.isCCTV) && (
+          <SliderRow
+            label={item.isWiFiAccessPoint ? 'Sinyal' : 'Kapsama'}
+            value={item.signalRange ?? (item.isWiFiAccessPoint ? 10 : 8)}
+            min={2}
+            max={item.isWiFiAccessPoint ? 20 : 15}
+            step={0.5}
+            format={(v) => `${v.toFixed(1)} m`}
+            onChange={(value) => actions.setSignalRange(item.id, value)}
+          />
+        )}
+
+        <ColorSwatchPicker
+          variant="glass"
+          value={item.color}
+          swatches={COLOR_SWATCHES.slice(0, 8)}
+          recent={recentColors.slice(0, 6)}
+          onChange={(color) => actions.setColor(item.id, color)}
+          onCommit={(color) => pushColor(color)}
+        />
+
+        <button
+          type="button"
+          onClick={() => props.onRemove(item.id)}
+          className="pc-tile"
+          style={{
+            width: '100%',
+            height: 34,
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            color: 'var(--pc-demolish)',
+            borderColor: 'rgba(228,82,72,0.5)',
+            background: 'rgba(228,82,72,0.10)',
+            fontFamily: 'var(--pc-font-display)',
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: 'var(--pc-tr-caps)',
+            textTransform: 'uppercase',
+          }}
+        >
+          <Icon name="demolish" size={16} />
+          Demolish
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface ActionTileProps {
+  icon: PlotcraftIconName;
+  label: string;
+  onClick(): void;
+  active?: boolean;
+}
+
+function ActionTile({ icon, label, onClick, active }: ActionTileProps): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={`pc-tile${active ? ' pc-tile--active' : ''}`}
+      style={{
+        padding: 6,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 2,
+        borderRadius: 10,
+      }}
+    >
+      <Icon name={icon} size={16} />
+      <span
+        style={{
+          fontFamily: 'var(--pc-font-display)',
+          fontWeight: 600,
+          fontSize: 8,
+          letterSpacing: 'var(--pc-tr-caps)',
+          textTransform: 'uppercase',
+          color: active ? 'var(--pc-cyan-glow)' : 'var(--pc-paper-soft)',
+        }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
+
+interface SofaShapeSegmentedProps {
+  value: SofaShape;
+  onChange(value: SofaShape): void;
+}
+
+function SofaShapeSegmented({ value, onChange }: SofaShapeSegmentedProps): JSX.Element {
+  const options: ReadonlyArray<{ key: SofaShape; label: string }> = [
+    { key: 'standard', label: 'Std' },
+    { key: 'L-shape', label: 'L' },
+    { key: 'U-shape', label: 'U' },
+  ];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span
+        style={{
+          width: 48,
+          fontFamily: 'var(--pc-font-display)',
+          fontWeight: 600,
+          fontSize: 10,
+          letterSpacing: 'var(--pc-tr-caps)',
+          textTransform: 'uppercase',
+          color: 'var(--pc-paper-soft)',
+        }}
+      >
+        Sofa
+      </span>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+        {options.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => onChange(option.key)}
+            className={`pc-tile${value === option.key ? ' pc-tile--active' : ''}`}
+            style={{
+              padding: '4px 6px',
+              borderRadius: 8,
+              fontFamily: 'var(--pc-font-display)',
+              fontWeight: 700,
+              fontSize: 10,
+              letterSpacing: 'var(--pc-tr-caps)',
+              textTransform: 'uppercase',
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface CameraModelCardProps {
+  modelId: string;
+  fov: number;
+  range: number;
+  onPickModel(modelId: string): void;
+  onSetFov(value: number): void;
+  onSetRange(value: number): void;
+}
+
+function CameraModelCard({ modelId, fov, range, onPickModel, onSetFov, onSetRange }: CameraModelCardProps): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: 10,
+        borderRadius: 12,
+        background: 'rgba(127,243,255,0.08)',
+        border: '1px solid var(--pc-cyan-glow)',
+        boxShadow: 'var(--pc-halo-cyan-soft)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon name="vision" size={14} style={{ color: 'var(--pc-cyan-glow)' }} />
+        <span
+          style={{
+            fontFamily: 'var(--pc-font-display)',
+            fontWeight: 700,
+            fontSize: 11,
+            letterSpacing: 'var(--pc-tr-caps)',
+            textTransform: 'uppercase',
+            color: 'var(--pc-cyan-glow)',
+          }}
+        >
+          Choose a real camera
+        </span>
+      </div>
+      <CctvModelRow value={modelId} onChange={onPickModel} />
+      <SliderRow
+        label="Görüş açısı"
+        value={fov}
+        min={20}
+        max={140}
+        step={1}
+        format={(v) => `${Math.round(v)}°`}
+        onChange={onSetFov}
+      />
+      <SliderRow
+        label="Menzil"
+        value={range}
+        min={2}
+        max={100}
+        step={0.5}
+        format={(v) => `${v.toFixed(1)} m`}
+        onChange={onSetRange}
+      />
+    </div>
+  );
+}
+
+const CCTV_TYPES = ['Dome', 'Bullet', 'PTZ', 'Indoor', 'Battery'] as const;
+
+interface CctvModelRowProps {
+  value: string;
+  onChange(modelId: string): void;
+}
+
+function CctvModelRow({ value, onChange }: CctvModelRowProps): JSX.Element {
+  const id = useId();
+  const selected = getCctvModel(value);
+  const spec = selected
+    ? `${selected.type} · ${selected.resolution} · ${selected.fov}° · ${selected.range} m IR${selected.note ? ` · ${selected.note}` : ''}`
+    : 'Custom — tune FOV and range below';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <label
+        htmlFor={id}
+        style={{
+          fontFamily: 'var(--pc-font-display)',
+          fontWeight: 600,
+          fontSize: 10,
+          letterSpacing: 'var(--pc-tr-caps)',
+          textTransform: 'uppercase',
+          color: 'var(--pc-paper-soft)',
+        }}
+      >
+        Camera model
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        style={{
+          width: '100%',
+          padding: '6px 8px',
+          borderRadius: 8,
+          background: 'rgba(0,0,0,0.30)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          color: 'var(--pc-paper)',
+          fontFamily: 'var(--pc-font-display)',
+          fontSize: 11,
+        }}
+      >
+        <option value="">Custom</option>
+        {CCTV_TYPES.map((type) => {
+          const models = CCTV_MODELS.filter((entry) => entry.type === type);
+          if (models.length === 0) return null;
+          return (
+            <optgroup key={type} label={type}>
+              {models.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.brand} {entry.model}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+      </select>
+      <span
+        style={{
+          fontFamily: 'var(--pc-font-body)',
+          fontSize: 9.5,
+          lineHeight: 1.3,
+          color: 'var(--pc-paper-soft)',
+        }}
+      >
+        {spec}
+      </span>
+    </div>
+  );
+}
+

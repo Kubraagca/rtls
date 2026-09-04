@@ -1,0 +1,53 @@
+ name: Deploy to GitHub Pages
+
+ on:
+  push:
+    branches: [main]
+  workflow_dispatch:                                                                                                                                                               
+  
+ permissions:                                                                                                                                                                       
+  contents: read                                          
+  pages: write
+  id-token: write
+
+ concurrency:
+  group: pages
+  cancel-in-progress: true
+
+ jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4                                                                                                                                                  
+  
+      - uses: actions/setup-node@v4
+        with:
+          # 22+: the jsdom test environment (vitest per-file, since 1.8.3)
+          # pulls an undici that needs newer Node platform internals — on
+          # Node 20 the forks worker dies with "webidl.util.markAsUncloneable
+          # is not a function" and the deploy has failed since.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint -- --max-warnings=0
+      - run: npm run test
+      - run: npm run build                                                                                                                                                         
+        env:
+          GITHUB_PAGES: 'true'                                                                                                                                                     
+                                                          
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+                                                                                                                                                                                    
+  deploy:
+    needs: build                                                                                                                                                                   
+    runs-on: ubuntu-latest                                
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

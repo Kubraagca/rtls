@@ -1,0 +1,274 @@
+'use client';
+
+import { useState } from 'react';
+import { useRoomEditor } from '../contexts';
+import { useSelection } from '../contexts';
+import { alignSelection, distributeSelection } from '../lib/alignment';
+import { readImageAsDataUrl } from '../lib/file-io';
+import { buildFurnitureSet } from '../lib/furniture-sets';
+import { hasCollisions } from '../lib/geometry';
+import { applyTheme } from '../lib/themes';
+import { Icon } from '../plotcraft/icon';
+import { ActionsPanel } from './actions-panel';
+import { AlignPanel } from './align-panel';
+import { CameraPresetsPanel } from './camera-presets-panel';
+import { FloorSwitcher } from './floor-switcher';
+import { FurnitureCatalogPanel } from './furniture-catalog-panel';
+import { ItemResizePanel } from './item-resize-panel';
+import { LibraryPanel } from './library-panel';
+import { PlacedItemsPanel } from './placed-items-panel';
+import { RoofPanel } from './roof-panel';
+import { RoomSettingsPanel } from './room-settings-panel';
+import { SetsPanel } from './sets-panel';
+import { ShortcutsPanel } from './shortcuts-panel';
+import { SidebarTabs, type SidebarTab } from './sidebar-tabs';
+import { StatisticsPanel } from './statistics-panel';
+import { TemplatesPanel } from './templates-panel';
+import { ThemesPanel } from './themes-panel';
+import { TimeOfDayPanel } from './time-of-day-panel';
+import { WallsPanel } from './walls-panel';
+import type { AlignEdge, DistributeAxis } from '../lib/alignment';
+import type { CameraPreset, CatalogItem } from '../lib/types';
+
+export interface SidebarDrawerProps {
+  collapsed: boolean;
+  onCollapse(): void;
+  // Scene-ref callbacks that can't move into context
+  onApplyPreset(preset: CameraPreset): void;
+  onFitToRoom(): void;
+  onScreenshot(): void;
+  onImport(file: File): void;
+  onExportGlb(): void;
+  onShareLink(): void;
+  /** Wall-aware placement (snaps doors/windows/cameras to walls) shared with the bottom catalog. */
+  placeCatalogItem(catalogItem: CatalogItem, position?: { x: number; z: number }): string;
+  /**
+   * The orchestrator's removeItem — it also clears the id from the
+   * multi-select set, which a local reimplementation here used to miss.
+   */
+  removeItem(id: string): void;
+}
+
+export function SidebarDrawer({
+  collapsed,
+  onCollapse,
+  onApplyPreset,
+  onFitToRoom,
+  onScreenshot,
+  onImport,
+  onExportGlb,
+  onShareLink,
+  placeCatalogItem,
+  removeItem,
+}: SidebarDrawerProps): JSX.Element {
+  const { layout, activeFloor, actions, view, isReady, playCue, history, catalogQuery, setCatalogQuery } = useRoomEditor();
+  const { selectedItem, selectOnly, allSelectedIds } = useSelection();
+  const [sidebarTab, setSidebarTabRaw] = useState<SidebarTab>(() => {
+    if (typeof window === 'undefined') return 'build';
+    const saved = localStorage.getItem('standalone-room-organizer-sidebar-tab');
+    return (saved === 'build' || saved === 'buy' || saved === 'style' || saved === 'manage') ? saved : 'build';
+  });
+  const setSidebarTab = (tab: SidebarTab) => {
+    setSidebarTabRaw(tab);
+    localStorage.setItem('standalone-room-organizer-sidebar-tab', tab);
+  };
+
+  const handleFloorPlanUpload = async (file: File) => {
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      actions.setFloorPlan(dataUrl);
+    } catch (uploadError) {
+      window.alert(uploadError instanceof Error ? uploadError.message : 'Failed to upload image.');
+    }
+  };
+
+  return (
+    <div style={{ display: collapsed ? 'none' : 'block' }}>
+      <button
+        type="button"
+        aria-label="Panelleri kapat"
+        onClick={onCollapse}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(20, 30, 40, 0.35)',
+          border: 'none',
+          zIndex: 35,
+          cursor: 'pointer',
+        }}
+      />
+      <aside
+        aria-label="Yan paneller"
+        className="pc-glass pc-glass--dark pc-sidebar"
+        style={{
+          position: 'absolute',
+          top: 72,
+          left: 16,
+          bottom: 16,
+          width: 320,
+          zIndex: 40,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: 12,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SidebarTabs active={sidebarTab} onChange={setSidebarTab} />
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Panelleri kapat"
+            className="pc-tile pc-sidebar-close"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            marginTop: 10,
+            paddingRight: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          {allSelectedIds.size >= 2 && (
+            <AlignPanel
+              selectionCount={allSelectedIds.size}
+              onAlign={(edge: AlignEdge) => {
+                const updates = alignSelection(activeFloor.items, allSelectedIds, edge);
+                if (updates.size > 0) actions.bulkSetPositions(updates);
+              }}
+              onDistribute={(axis: DistributeAxis) => {
+                const updates = distributeSelection(activeFloor.items, allSelectedIds, axis);
+                if (updates.size > 0) actions.bulkSetPositions(updates);
+              }}
+            />
+          )}
+
+          {sidebarTab === 'build' && (
+            <>
+              <FloorSwitcher />
+
+              <RoomSettingsPanel
+                onFloorPlanUpload={handleFloorPlanUpload}
+              />
+
+              <WallsPanel />
+
+              <RoofPanel />
+            </>
+          )}
+
+          {sidebarTab === 'buy' && (
+            <>
+              <FurnitureCatalogPanel
+                query={catalogQuery}
+                onQueryChange={setCatalogQuery}
+                onAdd={(catalogItem) => {
+                  const id = placeCatalogItem(catalogItem);
+                  selectOnly(id);
+                  playCue('place');
+                }}
+              />
+
+              <SetsPanel
+                onAddSet={(set) => {
+                  // Scale/refuse the set to the current room so pieces don't
+                  // land through the walls in small rooms (#73). An empty
+                  // result means the set can't fit here.
+                  const items = buildFurnitureSet(set, {
+                    roomWidth: layout.width,
+                    roomDepth: layout.height,
+                  });
+                  if (items.length === 0) return;
+                  actions.addItems(items);
+                  const last = items[items.length - 1];
+                  if (last) selectOnly(last.id);
+                }}
+              />
+
+              <PlacedItemsPanel
+                onRotate={(id) => {
+                  actions.rotateItem(id);
+                  playCue('rotate');
+                }}
+                onRemove={removeItem}
+              />
+            </>
+          )}
+
+          {sidebarTab === 'style' && (
+            <>
+              <ThemesPanel onApply={(themeKey) => actions.applyLayout(applyTheme(layout, themeKey))} />
+
+              <TimeOfDayPanel />
+
+              {selectedItem && (
+                <ItemResizePanel
+                  hasCollision={hasCollisions(selectedItem, activeFloor.items, layout.width, layout.height)}
+                  onDuplicate={(id) => {
+                    const newId = actions.duplicateItem(id);
+                    selectOnly(newId);
+                  }}
+                />
+              )}
+            </>
+          )}
+
+          {sidebarTab === 'manage' && (
+            <>
+              <CameraPresetsPanel
+                disabled={!isReady || view.view2D || view.walkthroughMode}
+                onApply={onApplyPreset}
+                onFit={onFitToRoom}
+                onScreenshot={onScreenshot}
+              />
+
+              <ActionsPanel
+                onImport={onImport}
+                onExportGlb={onExportGlb}
+                onShareLink={onShareLink}
+              />
+
+              <TemplatesPanel
+                onLoadTemplate={(template) => {
+                  actions.applyLayout({
+                    ...template,
+                    floors: template.floors.map((floor) => ({ ...floor, items: [...floor.items] })),
+                  });
+                  selectOnly(null);
+                }}
+              />
+
+              <LibraryPanel
+                currentLayout={layout}
+                onLoad={(loaded) => {
+                  actions.applyLayout(loaded);
+                  selectOnly(null);
+                  history.clear();
+                }}
+              />
+
+              <StatisticsPanel />
+              <ShortcutsPanel />
+            </>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
