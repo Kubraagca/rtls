@@ -652,6 +652,7 @@ export function RoomOrganizer(): JSX.Element {
       onItemSelect: handleSelect,
       onLightToggle: toggleLight,
       onCurtainToggle: toggleCurtain,
+      toggleLightOnSelect: gameMode === 'live',
       onItemDragStart: handleDragStart,
       onItemDrag: handleDrag,
       onItemDragEnd: handleDragEnd,

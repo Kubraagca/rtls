@@ -26,6 +26,8 @@ export interface SceneEventHandlers {
   onItemSelect: (id: string, mode: SelectionMode) => void;
   onLightToggle?: (id: string) => void;
   onCurtainToggle?: (id: string) => void;
+  /** Live mode treats a light click as an interaction, not a drag/select gesture. */
+  toggleLightOnSelect?: boolean;
   onItemDragStart?: (id: string) => void;
   onItemDrag: (id: string, x: number, z: number) => void;
   onItemDragEnd?: (id: string) => void;
@@ -191,6 +193,11 @@ export function attachDragHandlers({
     const mode: SelectionMode = event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
     const itemId = target.userData.id as string;
     handlersRef.current.onItemSelect(itemId, mode);
+
+    if (handlersRef.current.toggleLightOnSelect && target.userData.isLight === true) {
+      handlersRef.current.onLightToggle?.(itemId);
+      return;
+    }
 
     if (target.userData.locked === true) {
       if (target.userData.isLight === true) {
