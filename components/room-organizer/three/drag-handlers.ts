@@ -192,7 +192,16 @@ export function attachDragHandlers({
     const itemId = target.userData.id as string;
     handlersRef.current.onItemSelect(itemId, mode);
 
-    if (target.userData.locked === true || mode === 'toggle') return;
+    if (target.userData.locked === true) {
+      if (target.userData.isLight === true) {
+        handlersRef.current.onLightToggle?.(itemId);
+      }
+      if (target.userData.isCurtain === true) {
+        handlersRef.current.onCurtainToggle?.(itemId);
+      }
+      return;
+    }
+    if (mode === 'toggle') return;
 
     // Arm a potential drag, but don't open the session yet: the drag only
     // begins once the pointer travels past DRAG_THRESHOLD_PX (see onPointerMove).

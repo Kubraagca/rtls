@@ -1128,17 +1128,6 @@ export function RoomOrganizer(): JSX.Element {
               <Pencil size={13} strokeWidth={2.2} />
               DUVAR ÇİZ
             </button>}
-            <button
-              type="button"
-              className={`pc-tile${view.lightsEnabled ? ' pc-tile--active' : ''}`}
-              onClick={() => setView((v) => ({ ...v, lightsEnabled: !v.lightsEnabled }))}
-              aria-pressed={view.lightsEnabled}
-              title={view.lightsEnabled ? 'Lambaları kapat' : 'Lambaları aç'}
-              style={{ height: 34, padding: '0 10px', borderRadius: 9, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800 }}
-            >
-              <span aria-hidden>{view.lightsEnabled ? '💡' : '◌'}</span>
-              LAMBALAR
-            </button>
             <button type="button" className="pc-tile" onClick={history.undo} disabled={!history.canUndo} title="Geri al" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 18, opacity: history.canUndo ? 1 : 0.4 }}>↶</button>
             <button type="button" className="pc-tile" onClick={history.redo} disabled={!history.canRedo} title="İleri al" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 18, opacity: history.canRedo ? 1 : 0.4 }}>↷</button>
           </div>
