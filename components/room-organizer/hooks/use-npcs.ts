@@ -377,6 +377,24 @@ export function useNpcs(options: UseNpcsOptions): void {
 }
 
 function buildRtlsStations(items: readonly FurnitureItem[], halfW: number, halfD: number): RtlsStation[] {
+  // Prefer explicitly placed office chairs. A desk-derived offset is only an
+  // approximation and becomes visibly wrong as soon as the chair is moved or
+  // the desk is rotated independently.
+  const chairs = items.filter(
+    (item) => item.position && (item.type === 'office-chair' || item.type === 'conference-chair')
+  );
+  if (chairs.length > 0) {
+    return chairs.map((chair) => {
+      const yaw = chair.rotation ?? 0;
+      return {
+        x: clamp(chair.position!.x, -halfW, halfW),
+        z: clamp(chair.position!.z, -halfD, halfD),
+        // The chair back is modelled on local -Z, so the person faces local +Z.
+        faceYaw: normalizeAngle(yaw),
+      };
+    });
+  }
+
   const stations: RtlsStation[] = [];
   for (const item of items) {
     if (!item.position || item.type !== 'workstation') continue;
