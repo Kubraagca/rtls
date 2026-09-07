@@ -122,11 +122,16 @@ function updateCeilingLightVisibility(
   camera: import('three').PerspectiveCamera,
 ): void {
   const direction = camera.getWorldDirection(new THREE.Vector3());
-  const lookingAtCeiling = direction.y > 0.12;
+  const lookingAtCeiling = direction.y > 0.04;
   scene.traverse((node) => {
     if (node.userData.ceilingLight !== true) return;
     const floorY = Number(node.userData.floorY ?? 0);
-    node.visible = lookingAtCeiling && camera.position.y < floorY + 2.9;
+    const panelPosition = node.getWorldPosition(new THREE.Vector3());
+    const closeToPanel = camera.position.distanceTo(panelPosition) <= 8;
+    const belowCeiling = camera.position.y < floorY + 3.05;
+    // Keep the clean overview free of floating panels, but reveal them while
+    // the user is inside the storey or explicitly looking up at the ceiling.
+    node.visible = belowCeiling && (closeToPanel || lookingAtCeiling);
   });
 }
 
