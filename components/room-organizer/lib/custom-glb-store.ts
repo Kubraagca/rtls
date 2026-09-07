@@ -15,7 +15,8 @@ export const MAX_CUSTOM_GLB_BYTES = 32 * 1024 * 1024;
 
 const DB_NAME = 'rtls-office-custom-assets-v1';
 const STORE_NAME = 'glb-assets';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const CATALOG_STORE_NAME = 'catalog-items';
 
 export interface CustomGlbInspection {
   version: number;
@@ -34,6 +35,11 @@ interface CustomGlbRecord {
   data: ArrayBuffer;
 }
 
+export interface StoredCatalogItem {
+  item: import('./types').CatalogItem;
+  thumbnailDataUrl?: string;
+}
+
 const memoryFallback = new Map<string, CustomGlbRecord>();
 
 function isBrowser(): boolean {
@@ -49,6 +55,9 @@ function openDb(): Promise<IDBDatabase | null> {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(CATALOG_STORE_NAME)) {
+        db.createObjectStore(CATALOG_STORE_NAME, { keyPath: 'item.customModelId' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -178,4 +187,42 @@ export async function loadCustomGlbAssetData(id: string): Promise<ArrayBuffer | 
   if (!record?.data) return null;
   memoryFallback.set(id, record);
   return record.data.slice(0);
+}
+
+export async function saveCustomCatalogItem(record: StoredCatalogItem): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(CATALOG_STORE_NAME, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
+    tx.objectStore(CATALOG_STORE_NAME).put(record);
+  }).finally(() => db.close());
+}
+
+export async function loadCustomCatalogItems(): Promise<StoredCatalogItem[]> {
+  const db = await openDb();
+  if (!db) return [];
+  const records = await new Promise<StoredCatalogItem[]>((resolve) => {
+    const tx = db.transaction(CATALOG_STORE_NAME, 'readonly');
+    const request = tx.objectStore(CATALOG_STORE_NAME).getAll();
+    request.onerror = () => resolve([]);
+    request.onsuccess = () => resolve((request.result as StoredCatalogItem[]) ?? []);
+  }).finally(() => db.close());
+  return records;
+}
+
+export async function removeCustomCatalogItem(id: string): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction([STORE_NAME, CATALOG_STORE_NAME], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.objectStore(CATALOG_STORE_NAME).delete(id);
+  }).finally(() => db.close());
+  memoryFallback.delete(id);
 }

@@ -178,6 +178,7 @@ export function buildRoom(THREE: ThreeModule, options: RoomBuilderOptions): void
   makeStatic(floor);
   options.scene.add(floor);
 
+
   // Concrete foundation plinth — only on the ground floor. build-mode houses sit on
   // a low base that extends slightly past the wall plane and grounds the
   // building visually.

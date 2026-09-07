@@ -22,6 +22,7 @@ export interface RoomSettingsPanelProps {
 export function RoomSettingsPanel({ onFloorPlanUpload }: RoomSettingsPanelProps): JSX.Element {
   const { layout, activeFloor, actions, view, setView } = useRoomEditor();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backgroundFileInputRef = useRef<HTMLInputElement>(null);
   const nameId = useId();
   const widthId = useId();
   const heightId = useId();
@@ -34,6 +35,15 @@ export function RoomSettingsPanel({ onFloorPlanUpload }: RoomSettingsPanelProps)
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) onFloorPlanUpload(file);
+    event.target.value = '';
+  };
+
+  const handleBackgroundFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setView((current) => ({ ...current, backgroundImage: String(reader.result) }));
+    reader.readAsDataURL(file);
     event.target.value = '';
   };
 
@@ -84,6 +94,35 @@ export function RoomSettingsPanel({ onFloorPlanUpload }: RoomSettingsPanelProps)
             value={activeFloor.floorColor}
             onChange={(e) => actions.setFloorColor(e.target.value)}
           />
+        </div>
+
+        <div className="pt-2 border-t space-y-2">
+          <Label>Kat planı arka planı</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="color"
+              value={view.backgroundColor}
+              onChange={(e) => setView((current) => ({ ...current, backgroundColor: e.target.value, backgroundImage: null }))}
+              className="h-9 w-14 p-1"
+              aria-label="Arka plan rengi"
+            />
+            <span className="text-xs text-muted-foreground">Renk seç</span>
+          </div>
+          <input
+            ref={backgroundFileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleBackgroundFile}
+            className="hidden"
+          />
+          <Button type="button" onClick={() => backgroundFileInputRef.current?.click()} variant="outline" size="sm" className="w-full text-xs">
+            Arka plan görseli yükle
+          </Button>
+          {view.backgroundImage && (
+            <Button type="button" onClick={() => setView((current) => ({ ...current, backgroundImage: null }))} variant="outline" size="sm" className="w-full text-xs">
+              Görseli kaldır
+            </Button>
+          )}
         </div>
 
         <div className="pt-2 border-t">

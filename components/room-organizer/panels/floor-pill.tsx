@@ -64,7 +64,10 @@ export function FloorPill(): JSX.Element {
             <button
               key={floor.id}
               type="button"
-              onClick={() => actions.setActiveFloorIndex(index)}
+              onClick={() => {
+                actions.setActiveFloorIndex(index);
+                if (view.showAllFloors) toggle('showAllFloors');
+              }}
               title={`${floor.name} · ${floor.items.length} item${floor.items.length === 1 ? '' : 's'}`}
               aria-current={isActive ? 'true' : undefined}
               className={`pc-tile${isActive ? ' pc-tile--active' : ''}`}

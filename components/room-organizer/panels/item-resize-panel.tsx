@@ -72,6 +72,11 @@ export function ItemResizePanel(props: ItemResizePanelProps): JSX.Element {
           />
         ))}
 
+        <ElevationSlider
+          value={item.elevation ?? 0}
+          onChange={(value) => actions.updateItem(item.id, { elevation: value })}
+        />
+
         <RotationInput
           value={rotationDeg}
           onChange={(deg) => actions.setRotation(item.id, (deg * Math.PI) / 180)}
@@ -107,7 +112,7 @@ export function ItemResizePanel(props: ItemResizePanelProps): JSX.Element {
 
         <ColorSwatchPicker
           variant="card"
-          value={item.color}
+          value={item.color || '#cbd5e1'}
           swatches={COLOR_SWATCHES}
           recent={recentColors}
           onChange={(color) => actions.setColor(item.id, color)}
@@ -165,6 +170,32 @@ export function ItemResizePanel(props: ItemResizePanelProps): JSX.Element {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ElevationSlider({ value, onChange }: { value: number; onChange(value: number): void }): JSX.Element {
+  const id = useId();
+  return (
+    <div>
+      <Label htmlFor={id} className="text-xs">
+        Y position / ground height (m)
+      </Label>
+      <Input
+        id={id}
+        type="number"
+        min={0}
+        max={3}
+        step={0.05}
+        value={value.toFixed(2)}
+        onChange={(event) => {
+          const parsed = parseFloat(event.target.value);
+          if (Number.isFinite(parsed)) onChange(Math.max(0, Math.min(3, parsed)));
+        }}
+      />
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        Eşyayı zeminden yukarı kaldırır; H alanı sadece eşyanın boyutunu değiştirir.
+      </p>
+    </div>
   );
 }
 

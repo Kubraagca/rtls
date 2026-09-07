@@ -87,21 +87,10 @@ export function useItemDrag({
   // values (lamp glow, TV screens) are stashed on material.userData and
   // restored on release.
   const setDragCollisionTint = useCallback((group: ThreeNS.Object3D, colliding: boolean) => {
-    group.traverse((node) => {
-      const material = (node as ThreeNS.Mesh).material;
-      const materials = Array.isArray(material) ? material : material ? [material] : [];
-      for (const mat of materials) {
-        const std = mat as ThreeNS.MeshStandardMaterial;
-        if (!std.emissive) continue;
-        if (colliding) {
-          if (std.userData.dragTint === undefined) std.userData.dragTint = std.emissive.getHex();
-          std.emissive.setHex(0x7f1d1d);
-        } else if (std.userData.dragTint !== undefined) {
-          std.emissive.setHex(std.userData.dragTint as number);
-          delete std.userData.dragTint;
-        }
-      }
-    });
+    // Collision detection remains active, but overlapping furniture keeps its
+    // original material instead of receiving a red drag tint.
+    void group;
+    void colliding;
   }, []);
 
   const handleDragStart = useCallback(

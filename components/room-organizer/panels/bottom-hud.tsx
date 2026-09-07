@@ -20,9 +20,11 @@ export interface BottomHudProps {
   onZoom(direction: '+' | '-'): void;
   onFit(): void;
   placeCatalogItem(catalogItem: CatalogItem, position?: { x: number; z: number }): string;
+  onRemoveCatalogItem(item: CatalogItem): void;
+  onUpdateCatalogItem(item: CatalogItem): void;
 }
 
-export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom, onFit, placeCatalogItem }: BottomHudProps): JSX.Element {
+export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom, onFit, placeCatalogItem, onRemoveCatalogItem, onUpdateCatalogItem }: BottomHudProps): JSX.Element {
   const { layout, activeFloor, actions, view, toggle, setView, isReady, error, gameMode, setGameMode, playCue } = useRoomEditor();
   const { selectOnly, setSelectedItemId, setExtraSelectedIds } = useSelection();
   const [buildToolCategory, setBuildToolCategory] = useState<BuildToolCategory>('seating');
@@ -45,7 +47,7 @@ export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom,
         zIndex: 25,
       }}
     >
-      {gameMode !== 'live' ? (
+      {gameMode !== 'live' && !view.view2D ? (
         <div
           style={{
             display: 'flex',
@@ -60,7 +62,7 @@ export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom,
           }}
         >
           {/* Paint panel opens with the wall tool OR when any wall is clicked in 3D. */}
-          {(view.drawWallMode || selectedWall !== null) && (
+          {!view.view2D && (view.drawWallMode || selectedWall !== null) && (
             <WallPaintPanel
               selectedWall={selectedWall}
               onSelectedWallChange={onSelectedWallChange}
@@ -95,7 +97,7 @@ export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom,
               />
             </>
           )}
-          <BuildToolsPanel
+          {!view.view2D && <BuildToolsPanel
             active={buildToolCategory}
             drawWallMode={view.drawWallMode}
             onSelect={(tool) => {
@@ -106,12 +108,12 @@ export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom,
                 toggle('drawWallMode');
               }
             }}
-          />
-          <CameraPad
+          />}
+          {!view.view2D && <CameraPad
             onOrbit={onOrbit}
             onZoom={onZoom}
             onFit={onFit}
-          />
+          />}
         </div>
       ) : (
         <div />
@@ -120,6 +122,8 @@ export function BottomHud({ selectedWall, onSelectedWallChange, onOrbit, onZoom,
       {gameMode !== 'live' ? (
         <CatalogStrip
           category={buildToolCategory === 'walls' ? 'all' : buildToolCategory}
+          onRemoveCatalogItem={onRemoveCatalogItem}
+          onUpdateCatalogItem={onUpdateCatalogItem}
           onAdd={(catalogItem) => {
             const id = placeCatalogItem(catalogItem);
             selectOnly(id);

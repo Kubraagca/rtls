@@ -114,6 +114,8 @@ export interface FurnitureItem {
   price?: number;
   category?: FurnitureCategory;
   position?: Vec2;
+  /** Height above the floor used when an item is placed on a tabletop. */
+  elevation?: number;
   rotation?: number;
   isWiFiAccessPoint?: boolean;
   isCCTV?: boolean;
@@ -148,6 +150,10 @@ export interface FurnitureItem {
   customModelFileName?: string;
   /** Original binary size in bytes; useful for performance/debug UI. */
   customModelBytes?: number;
+  /** Browser-local preview image used by the catalogue tile. */
+  customThumbnail?: string;
+  /** Backend URL of a server-stored custom GLB. */
+  customModelUrl?: string;
 }
 
 export type CameraPreset = 'iso' | 'top' | 'front' | 'corner';
@@ -217,6 +223,9 @@ export const FLOOR_HEIGHT_METERS = 3;
 
 export interface ViewSettings {
   view2D: boolean;
+  /** Background shown behind the building and on the 2D plan canvas. */
+  backgroundColor: string;
+  backgroundImage: string | null;
   showMeasurements: boolean;
   showWiFiSignals: boolean;
   snapToGrid: boolean;

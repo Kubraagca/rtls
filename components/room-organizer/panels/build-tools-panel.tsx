@@ -140,7 +140,7 @@ export function BuildToolsPanel(props: BuildToolsPanelProps): JSX.Element {
                         fontSize: 8,
                         letterSpacing: '0.04em',
                         textTransform: 'uppercase',
-                        color: isActive ? 'var(--pc-cyan-glow)' : 'var(--pc-paper-soft)',
+                        color: isActive ? 'var(--pc-cyan-glow)' : 'var(--pc-ink-soft)',
                         lineHeight: 1,
                         maxWidth: '100%',
                         overflow: 'hidden',

@@ -1,7 +1,6 @@
 'use client';
 
 import { useRoomEditor } from '../contexts';
-import { CURRENCY_SYMBOL } from '../lib/constants';
 import { Icon, type PlotcraftIconName } from '../plotcraft/icon';
 import type { GameMode } from '../lib/types';
 
@@ -13,11 +12,7 @@ export interface ModePanelProps {
 }
 
 export function ModePanel({ onSetMode }: ModePanelProps): JSX.Element {
-  const { layout, history, view, toggle, gameMode } = useRoomEditor();
-  const totalCost = layout.floors.reduce(
-    (sum, floor) => sum + floor.items.reduce((acc, item) => acc + (item.price ?? 0), 0),
-    0
-  );
+  const { history, gameMode } = useRoomEditor();
 
   if (gameMode === 'live') {
     return (
@@ -61,16 +56,6 @@ export function ModePanel({ onSetMode }: ModePanelProps): JSX.Element {
         <ModeButton active={false} label="RTLS CANLI" live onClick={() => onSetMode('live')} />
       </div>
 
-      <div style={{ textAlign: 'right' }}>
-        <div className="pc-money" style={{ fontSize: 36, lineHeight: 1, letterSpacing: '-0.01em' }}>
-          {CURRENCY_SYMBOL}
-          {totalCost.toLocaleString()}
-        </div>
-        <div className="pc-hud-header" style={{ fontSize: 9, opacity: 0.8, marginTop: 2 }}>
-          Tahmini Kurulum Maliyeti
-        </div>
-      </div>
-
       <div
         style={{
           background: 'rgba(0, 0, 0, 0.20)',
@@ -83,19 +68,6 @@ export function ModePanel({ onSetMode }: ModePanelProps): JSX.Element {
         }}
       >
         <ActionButton label="Geri al" icon="undo" disabled={!history.canUndo} onClick={history.undo} />
-        <ActionButton
-          label={view.showMinimap ? 'Mini haritayı gizle' : 'Mini haritayı göster'}
-          icon="minimap"
-          active={view.showMinimap}
-          onClick={() => toggle('showMinimap')}
-        />
-        <ActionButton
-          label={view.snapToGrid ? 'Izgarayı kapat' : 'Izgaraya hizala'}
-          icon="grid"
-          active={view.snapToGrid}
-          disabled={false}
-          onClick={() => toggle('snapToGrid')}
-        />
       </div>
     </div>
   );

@@ -26,32 +26,40 @@ export interface Render2DOptions {
    * the margin consumes the whole canvas (#118).
    */
   padding?: number;
+  /** Interactive 2D plan camera. */
+  zoom?: number;
+  panX?: number;
+  panY?: number;
+  wallPreview?: { start: { x: number; z: number }; end: { x: number; z: number } } | null;
+  backgroundColor?: string;
+  backgroundImage?: string | null;
 }
 
 const PADDING = 60;
 // Matches the 0.16 m thickness modelled in three/interior-walls.ts.
-const INTERIOR_WALL_THICKNESS_M = 0.16;
 
 /** Convert a screen click on the full-size 2D plan into room coordinates. */
 export function worldPositionFrom2DClient(
   canvas: HTMLCanvasElement,
   layout: RoomLayout,
   clientX: number,
-  clientY: number
+  clientY: number,
+  view: { zoom?: number; panX?: number; panY?: number; allowOutside?: boolean } = {}
 ): { x: number; z: number } | null {
   const rect = canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
   const padding = PADDING;
-  const scale = Math.min(
+  const baseScale = Math.min(
     (rect.width - padding * 2) / layout.width,
     (rect.height - padding * 2) / layout.height
   );
+  const scale = baseScale * Math.max(0.5, view.zoom ?? 1);
   if (scale <= 0) return null;
-  const offsetX = (rect.width - layout.width * scale) / 2;
-  const offsetY = (rect.height - layout.height * scale) / 2;
+  const offsetX = (rect.width - layout.width * scale) / 2 + (view.panX ?? 0);
+  const offsetY = (rect.height - layout.height * scale) / 2 + (view.panY ?? 0);
   const x = (clientX - rect.left - offsetX) / scale - layout.width / 2;
   const z = (clientY - rect.top - offsetY) / scale - layout.height / 2;
-  if (x < -layout.width / 2 || x > layout.width / 2 || z < -layout.height / 2 || z > layout.height / 2) {
+  if (!view.allowOutside && (x < -layout.width / 2 || x > layout.width / 2 || z < -layout.height / 2 || z > layout.height / 2)) {
     return null;
   }
   return { x, z };
@@ -63,6 +71,7 @@ export function worldPositionFrom2DClient(
 // after it). Subsequent renders reuse the cached, already-decoded Image and
 // draw it synchronously in the correct layer order.
 let floorPlanImageCache: { url: string; image: HTMLImageElement } | null = null;
+let backgroundImageCache: { url: string; image: HTMLImageElement } | null = null;
 
 /**
  * Callbacks the consumers install so the async floor-plan decode can trigger
@@ -105,19 +114,27 @@ export function render2DTopDown(options: Render2DOptions): void {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, viewWidth, viewHeight);
+  ctx.fillStyle = options.backgroundColor ?? '#ffffff';
+  ctx.fillRect(0, 0, viewWidth, viewHeight);
+  drawCanvasBackgroundImage(ctx, options.backgroundImage, viewWidth, viewHeight);
+  drawBackgroundGrid(ctx, viewWidth, viewHeight);
 
   const padding = options.padding ?? PADDING;
-  const scale = Math.min(
+  const baseScale = Math.min(
     (viewWidth - padding * 2) / layout.width,
     (viewHeight - padding * 2) / layout.height
   );
-  const offsetX = (viewWidth - layout.width * scale) / 2;
-  const offsetY = (viewHeight - layout.height * scale) / 2;
+  const scale = baseScale * Math.max(0.5, options.zoom ?? 1);
+  const offsetX = (viewWidth - layout.width * scale) / 2 + (options.panX ?? 0);
+  const offsetY = (viewHeight - layout.height * scale) / 2 + (options.panY ?? 0);
 
   drawFloor(ctx, layout, floor, offsetX, offsetY, scale);
   drawGrid(ctx, layout, offsetX, offsetY, scale);
   drawRoomOutline(ctx, layout, floor, offsetX, offsetY, scale);
   drawInteriorWalls(ctx, layout, floor, offsetX, offsetY, scale);
+  if (options.wallPreview) {
+    drawWallPreview(ctx, layout, options.wallPreview, offsetX, offsetY, scale);
+  }
 
   if (options.showHeatmap) {
     drawHeatmap(ctx, layout, floor.items, offsetX, offsetY, scale, viewWidth, viewHeight);
@@ -146,6 +163,80 @@ export function render2DTopDown(options: Render2DOptions): void {
   if (options.showMeasurements) {
     drawRoomDimensions(ctx, layout, offsetX, offsetY, scale);
   }
+}
+
+function drawCanvasBackgroundImage(
+  ctx: CanvasRenderingContext2D,
+  url: string | null | undefined,
+  width: number,
+  height: number
+): void {
+  if (!url) return;
+  if (backgroundImageCache?.url !== url) {
+    const image = new Image();
+    backgroundImageCache = { url, image };
+    image.onload = () => {
+      if (backgroundImageCache?.image === image) requestRepaint();
+    };
+    image.src = url;
+    return;
+  }
+  const image = backgroundImageCache.image;
+  if (!image.complete || image.naturalWidth === 0) return;
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+  const drawWidth = image.naturalWidth * scale;
+  const drawHeight = image.naturalHeight * scale;
+  ctx.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
+function drawWallPreview(
+  ctx: CanvasRenderingContext2D,
+  layout: RoomLayout,
+  preview: { start: { x: number; z: number }; end: { x: number; z: number } },
+  offsetX: number,
+  offsetY: number,
+  scale: number
+): void {
+  const halfW = layout.width / 2;
+  const halfD = layout.height / 2;
+  const x1 = offsetX + (preview.start.x + halfW) * scale;
+  const y1 = offsetY + (preview.start.z + halfD) * scale;
+  const x2 = offsetX + (preview.end.x + halfW) * scale;
+  const y2 = offsetY + (preview.end.z + halfD) * scale;
+  ctx.save();
+  ctx.strokeStyle = '#1296c5';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.fillStyle = '#198cff';
+  for (const [x, y] of [[x1, y1], [x2, y2]] as const) {
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBackgroundGrid(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  const spacing = 16;
+  ctx.save();
+  ctx.strokeStyle = '#f0f2f4';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= width; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= height; y += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(width, y + 0.5);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 
@@ -275,11 +366,12 @@ function drawFloor(
   offsetY: number,
   scale: number
 ): void {
+  void floor;
   const url = layout.floorPlanImage;
   if (url) {
     // Fill the floor colour first so there's a base while (or if) the image is
     // still decoding — avoids a flash of the raw canvas background.
-    ctx.fillStyle = floor.floorColor;
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(offsetX, offsetY, layout.width * scale, layout.height * scale);
 
     // naturalWidth guard: a broken image also reports `complete`, and
@@ -308,7 +400,7 @@ function drawFloor(
       img.src = url;
     }
   } else {
-    ctx.fillStyle = floor.floorColor;
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(offsetX, offsetY, layout.width * scale, layout.height * scale);
   }
 }
@@ -320,7 +412,7 @@ function drawGrid(
   offsetY: number,
   scale: number
 ): void {
-  ctx.strokeStyle = '#ddd';
+  ctx.strokeStyle = '#edf0f2';
   ctx.lineWidth = 1;
   // Anchor the grid to the world centre (0,0) so the drawn cells line up with
   // `snapToGrid`, which rounds world coordinates to multiples of
@@ -368,8 +460,8 @@ function drawRoomOutline(
   for (const edge of edges) {
     const isHidden = hidden.has(edge.id);
     ctx.save();
-    ctx.strokeStyle = isHidden ? '#bbb' : '#666';
-    ctx.lineWidth = isHidden ? 1.5 : 3;
+    ctx.strokeStyle = isHidden ? '#cbd1d5' : '#aeb3b6';
+    ctx.lineWidth = isHidden ? 2 : 5;
     if (isHidden) ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.moveTo(edge.from[0], edge.from[1]);
@@ -392,15 +484,35 @@ function drawInteriorWalls(
   const halfW = layout.width / 2;
   const halfD = layout.height / 2;
   ctx.save();
-  ctx.strokeStyle = '#555';
+  ctx.strokeStyle = '#9aa1a6';
   ctx.lineCap = 'butt';
-  ctx.lineWidth = Math.max(2, INTERIOR_WALL_THICKNESS_M * scale);
+  ctx.lineWidth = 5;
   for (const wall of walls) {
+    const x1 = offsetX + (wall.x1 + halfW) * scale;
+    const y1 = offsetY + (wall.z1 + halfD) * scale;
+    const x2 = offsetX + (wall.x2 + halfW) * scale;
+    const y2 = offsetY + (wall.z2 + halfD) * scale;
     ctx.beginPath();
-    ctx.moveTo(offsetX + (wall.x1 + halfW) * scale, offsetY + (wall.z1 + halfD) * scale);
-    ctx.lineTo(offsetX + (wall.x2 + halfW) * scale, offsetY + (wall.z2 + halfD) * scale);
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
     ctx.stroke();
+    drawWallLengthLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2, Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1));
   }
+  ctx.restore();
+}
+
+function drawWallLengthLabel(ctx: CanvasRenderingContext2D, x: number, y: number, lengthMeters: number): void {
+  if (lengthMeters < 0.25) return;
+  const label = `${lengthMeters.toFixed(2)} m`;
+  ctx.save();
+  ctx.font = '11px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.strokeText(label, x, y);
+  ctx.fillStyle = '#2f3438';
+  ctx.fillText(label, x, y);
   ctx.restore();
 }
 
@@ -453,7 +565,6 @@ function drawFurniture(
 ): void {
   for (const item of options.floor.items) {
     if (!item.position) continue;
-    const collision = options.hasCollision(item);
     const cx = offsetX + (item.position.x + options.layout.width / 2) * scale;
     const cy = offsetY + (item.position.z + options.layout.height / 2) * scale;
     const w = item.width * scale;
@@ -465,43 +576,28 @@ function drawFurniture(
     // 2D footprint matches the 3D scene's orientation.
     ctx.rotate(-(item.rotation ?? 0));
 
-    ctx.fillStyle = collision ? 'rgba(255, 0, 0, 0.7)' : item.color;
-    ctx.fillRect(-w / 2, -d / 2, w, d);
-
     if (options.selectedItemId === item.id) {
-      ctx.strokeStyle = collision ? '#ff6666' : '#00ff00';
+      ctx.strokeStyle = '#00ff00';
       ctx.lineWidth = 3;
     } else if (options.extraSelectedIds?.has(item.id)) {
       // Multi-select extras share the primary's green, slightly thinner.
-      ctx.strokeStyle = collision ? '#ff6666' : '#00cc00';
-      ctx.lineWidth = 2;
-    } else if (collision) {
-      ctx.strokeStyle = '#ff0000';
+      ctx.strokeStyle = '#00cc00';
       ctx.lineWidth = 2;
     } else {
-      ctx.strokeStyle = '#333';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'transparent';
+      ctx.lineWidth = 0;
     }
-    ctx.strokeRect(-w / 2, -d / 2, w, d);
+    if (options.selectedItemId === item.id || options.extraSelectedIds?.has(item.id)) {
+      ctx.strokeRect(-w / 2, -d / 2, w, d);
+    }
 
     ctx.font = `${Math.min(w, d) * 0.6}px Arial`;
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = item.color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(item.icon, 0, 0);
     ctx.restore();
 
-    if (options.showMeasurements) {
-      // The label is drawn in screen space (outside the rotated transform), so
-      // offset it by the rotation-aware AABB half-depth to clear the footprint.
-      const { halfD } = rotatedHalfExtents(item);
-      ctx.save();
-      ctx.fillStyle = '#333';
-      ctx.font = '10px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${item.width}m × ${item.depth}m`, cx, cy + halfD * scale + 15);
-      ctx.restore();
-    }
   }
 }
 

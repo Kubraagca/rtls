@@ -52,8 +52,9 @@ export function renderInteriorWalls(
       : null;
 
   for (const wall of walls) {
+    if (![wall.x1, wall.z1, wall.x2, wall.z2].every(Number.isFinite)) continue;
     const length = Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1);
-    if (length < 0.01) continue;
+    if (length < 0.01 || length > 100) continue;
 
     const openings = options.openingCandidates
       ? computeSegmentOpenings(wall, options.openingCandidates, owners)

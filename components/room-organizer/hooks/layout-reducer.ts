@@ -14,6 +14,7 @@ import type {
   WallId,
   WallPattern,
 } from '../lib/types';
+import { normaliseCustomItemDimensions } from '../lib/custom-item-sizing';
 
 // ---------------------------------------------------------------------------
 // Action union
@@ -255,8 +256,12 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
 
     // -- item CRUD ----------------------------------------------------------
     case 'addCatalogItem': {
+      const dimensions = action.catalogItem.customModelId
+        ? normaliseCustomItemDimensions(action.catalogItem)
+        : undefined;
       const newItem: FurnitureItem = {
         ...action.catalogItem,
+        ...(dimensions ?? {}),
         id: action.id,
         locked: true,
         position: action.position ?? { x: 0, z: 0 },
@@ -618,6 +623,11 @@ function normaliseLayout(layout: RoomLayout): RoomLayout {
       : layout.floors.slice(0, MAX_FLOORS).map((floor) => ({
           ...floor,
           floorColor: floor.floorColor || '#c9a57d',
+          items: floor.items.map((item) => ({
+            ...item,
+            color: item.color || '#cbd5e1',
+            position: item.position ?? { x: 0, z: 0 },
+          })),
         }));
   return { ...layout, width, height, floors };
 }

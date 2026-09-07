@@ -9,6 +9,23 @@ import { isOpening, snapOpeningToWall, snapWallMountedItem } from '../lib/openin
 import type { LayoutActions } from './use-layout-state';
 import type { CatalogItem, FloorLayout, ViewSettings } from '../lib/types';
 
+const TABLETOP_TYPES = new Set(['desk', 'workstation', 'meeting-table', 'dining-table', 'coffee-table', 'side-table', 'counter', 'nightstand', 'reception-desk']);
+
+function tabletopElevation(item: CatalogItem, position: { x: number; z: number }, items: readonly FloorLayout['items'][number][]): number {
+  const itemName = item.name.toLowerCase();
+  const canStack = item.category === 'electronics' || item.category === 'decor' || item.type.includes('computer') || item.type.includes('printer') || item.type.includes('coffee-machine') || itemName.includes('computer') || itemName.includes('bilgisayar');
+  if (!canStack) return 0;
+  const support = items
+    .filter((candidate) => TABLETOP_TYPES.has(candidate.type) && candidate.position)
+    .filter((candidate) => {
+      const xOverlap = Math.abs(position.x - candidate.position!.x) <= (candidate.width - item.width) / 2 + 0.02;
+      const zOverlap = Math.abs(position.z - candidate.position!.z) <= (candidate.depth - item.depth) / 2 + 0.02;
+      return xOverlap && zOverlap && candidate.width >= item.width && candidate.depth >= item.depth;
+    })
+    .sort((a, b) => (b.elevation ?? 0) + b.height - ((a.elevation ?? 0) + a.height))[0];
+  return support ? (support.elevation ?? 0) + support.height : 0;
+}
+
 export interface UseItemPlacementParams {
   activeFloor: FloorLayout;
   /** World-space Y of the active floor — the drag plane. */
@@ -143,7 +160,11 @@ export function useItemPlacement({
         const outsidePos = { x: 0, z: roomDepth / 2 + catalogItem.depth / 2 + 0.5 };
         return actions.addCatalogItem(catalogItem, outsidePos);
       }
-      return actions.addCatalogItem(catalogItem, position);
+      const finalPosition = position ?? { x: 0, z: 0 };
+      const id = actions.addCatalogItem(catalogItem, position);
+      const elevation = tabletopElevation(catalogItem, finalPosition, activeFloor.items);
+      if (elevation > 0) actions.updateItem(id, { elevation });
+      return id;
     },
     [actions, activeFloor.interiorWalls, activeFloorY, roomWidth, roomDepth]
   );

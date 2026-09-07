@@ -45,7 +45,7 @@ export function ColorSwatchPicker(props: ColorSwatchPickerProps): JSX.Element {
 }
 
 function isSelected(value: string, swatch: string): boolean {
-  return value.toLowerCase() === swatch.toLowerCase();
+  return (value || '#cbd5e1').toLowerCase() === swatch.toLowerCase();
 }
 
 function GlassSkin({ value, swatches, recent, onChange, onCommit }: ColorSwatchPickerProps): JSX.Element {

@@ -15,17 +15,14 @@ import type {
 
 const WALL_PATTERNS: ReadonlyArray<{ id: WallPattern; label: string; thumb: PatternThumbName }> = [
   { id: 'solid',     label: 'Düz boya',     thumb: 'solid'   },
-  { id: 'siding',    label: 'Kaplama',      thumb: 'siding'  },
   { id: 'brick',     label: 'Tuğla',        thumb: 'brick'   },
   { id: 'panel',     label: 'Ahşap panel',  thumb: 'panel'   },
-  { id: 'wallpaper', label: 'Duvar kâğıdı', thumb: 'dots'    },
   { id: 'plaster',   label: 'Sıva',         thumb: 'speckle' },
 ];
 
 const FLOOR_PATTERNS: ReadonlyArray<{ id: FloorPattern; label: string; thumb: PatternThumbName }> = [
   { id: 'wood',     label: 'Ahşap parke', thumb: 'wood'    },
   { id: 'tile',     label: 'Fayans',      thumb: 'tile'    },
-  { id: 'carpet',   label: 'Halı',        thumb: 'speckle' },
   { id: 'concrete', label: 'Beton',       thumb: 'solid'   },
   { id: 'solid',    label: 'Düz',         thumb: 'solid'   },
 ];
@@ -42,50 +39,23 @@ interface SwatchGroup {
 
 const WALL_PALETTES: readonly SwatchGroup[] = [
   {
-    id: 'pastel',
-    label: 'Pastels',
+    id: 'corporate',
+    label: 'Kurumsal',
     colors: [
-      '#e8dcc4', '#ffffff', '#fff4d6', '#ffe9b0',
-      '#b8e0c4', '#a8d8e8', '#d6c4e8', '#fce4ec',
-      '#f5b7a8', '#ffd1b3', '#c4d4b0', '#a0c5c5',
-    ],
-  },
-  {
-    id: 'warm',
-    label: 'Warm',
-    colors: [
-      '#d4a373', '#c9885a', '#b06a3b', '#8b5a3c',
-      '#f7c873', '#e9a13c', '#c47a2a', '#7a4f2a',
-      '#c93b3b', '#a02828', '#d9908e', '#cf6f7d',
-    ],
-  },
-  {
-    id: 'cool',
-    label: 'Cool',
-    colors: [
-      '#7aa9d6', '#4a7fb7', '#2c5d9b', '#1d3f78',
-      '#4fa8a5', '#2e7d7a', '#1b5e60', '#114448',
-      '#a48ad4', '#6f4c9b', '#4b2e7a', '#2d1b54',
-    ],
-  },
-  {
-    id: 'neutral',
-    label: 'Neutral',
-    colors: [
-      '#ffffff', '#f0ece4', '#d8d8d8', '#b0b0b0',
-      '#888888', '#5a5a5a', '#2d2d2d', '#1a1a1a',
-      '#dccab0', '#bca58a', '#8a7560', '#4a3a2a',
+      '#ffffff', '#f7f7f5', '#eeeae3', '#e5ded2',
+      '#d6d3ce', '#b8bcc0', '#8b9298', '#5f6870',
+      '#343a40', '#cbbda9', '#a9957d', '#766653',
     ],
   },
 ];
 
 const FLOOR_PALETTES: readonly SwatchGroup[] = [
   {
-    id: 'wood',
-    label: 'Wood',
+    id: 'corporate',
+    label: 'Kurumsal',
     colors: [
-      '#e5c8a0', '#d4b896', '#c9a57d', '#b08858',
-      '#8b5a3c', '#6b4226', '#5d3a23', '#3e261a',
+      '#ffffff', '#f7f7f5', '#eeeae3', '#e5ded2',
+      '#d6d3ce', '#b8bcc0', '#8b9298', '#5f6870',
     ],
   },
   {
@@ -96,15 +66,9 @@ const FLOOR_PALETTES: readonly SwatchGroup[] = [
       '#b0b0b0', '#7c7c7c', '#444448', '#2d2d2d',
     ],
   },
-  {
-    id: 'bold',
-    label: 'Bold',
-    colors: [
-      '#c93b3b', '#1d3f78', '#2e7d7a', '#6f4c9b',
-      '#e9a13c', '#a02828', '#1b5e60', '#4b2e7a',
-    ],
-  },
 ];
+
+const DEFAULT_FLOOR_COLOR = '#c9a57d';
 
 // ============================================================================
 // Apply-to + active-tab state
@@ -153,8 +117,8 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
     }
   };
   const [surface, setSurface] = useState<Surface>('walls');
-  const [wallGroup, setWallGroup] = useState<string>('pastel');
-  const [floorGroup, setFloorGroup] = useState<string>('wood');
+  const [wallGroup, setWallGroup] = useState<string>('corporate');
+  const [floorGroup, setFloorGroup] = useState<string>('corporate');
 
   // Apply-to driven by the 3D click selection: when the user clicks a wall in
   // the world, the chip jumps to that wall automatically; otherwise default
@@ -269,7 +233,6 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
             swatches={activeWallPalette.colors}
             value={currentWallColor}
             onChange={(color) => applyWallColor(applyTo, color)}
-            onCustomChange={(color) => applyWallColor(applyTo, color)}
           />
         </>
       ) : (
@@ -287,6 +250,13 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
             ))}
           </PatternGrid>
 
+          <FloorResetRow
+            patternActive={currentFloorPattern !== 'solid'}
+            colorActive={floor.floorColor.toLowerCase() !== DEFAULT_FLOOR_COLOR}
+            onRemovePattern={() => actions.setFloorPattern('solid')}
+            onRemoveColor={() => actions.setFloorColor(DEFAULT_FLOOR_COLOR)}
+          />
+
           <SectionLabel>Floor Colour · {activeFloorPalette.label}</SectionLabel>
           <GroupTabs
             groups={FLOOR_PALETTES}
@@ -297,10 +267,46 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
             swatches={activeFloorPalette.colors}
             value={floor.floorColor}
             onChange={(color) => actions.setFloorColor(color)}
-            onCustomChange={(color) => actions.setFloorColor(color)}
           />
         </>
       )}
+    </div>
+  );
+}
+
+function FloorResetRow({
+  patternActive,
+  colorActive,
+  onRemovePattern,
+  onRemoveColor,
+}: {
+  patternActive: boolean;
+  colorActive: boolean;
+  onRemovePattern(): void;
+  onRemoveColor(): void;
+}): JSX.Element {
+  return (
+    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+      <button
+        type="button"
+        onClick={onRemovePattern}
+        disabled={!patternActive}
+        title="Seçili parke desenini kaldır"
+        className="pc-tile"
+        style={{ flex: 1, height: 22, fontSize: 8, fontWeight: 800, opacity: patternActive ? 1 : 0.45 }}
+      >
+        × Parkeyi kaldır
+      </button>
+      <button
+        type="button"
+        onClick={onRemoveColor}
+        disabled={!colorActive}
+        title="Seçili zemin rengini kaldır"
+        className="pc-tile"
+        style={{ flex: 1, height: 22, fontSize: 8, fontWeight: 800, opacity: colorActive ? 1 : 0.45 }}
+      >
+        × Rengi kaldır
+      </button>
     </div>
   );
 }

@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useLayout } from '../hooks/use-layout-store';
-import { CURRENCY_SYMBOL } from '../lib/constants';
-import { totalCost } from '../lib/geometry';
 import { Icon, type PlotcraftIconName } from '../plotcraft/icon';
 
 export interface HeaderStatsProps {
@@ -20,18 +18,12 @@ export function HeaderStats({
   // `layout` from the store selector — re-renders only on layout changes.
   const layout = useLayout();
   const allItems = layout.floors.flatMap((floor) => floor.items);
-  const cost = totalCost(allItems);
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
       <Chip icon="box" label="Eşya" value={allItems.length.toString()} />
       <Chip icon="stairs" label="Kat" value={layout.floors.length.toString()} />
       <Chip icon="ruler" label="Alan" value={`${layout.width}m × ${layout.height}m`} />
-      <Chip
-        icon="coin"
-        label="Maliyet"
-        value={`${CURRENCY_SYMBOL}${cost.toLocaleString()}`}
-      />
       <SaveIndicator lastSavedAt={lastSavedAt} saving={saving} saveError={saveError} />
     </div>
   );

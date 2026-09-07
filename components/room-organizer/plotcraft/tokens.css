@@ -96,9 +96,12 @@
   border: 1px solid var(--pc-glass-stroke);
   border-radius: var(--pc-r-lg);
   box-shadow: var(--pc-shadow-glass);
+  color: var(--pc-ink);
+}
+.pc-glass--dark {
+  background-color: var(--pc-glass-tint-dark);
   color: var(--pc-paper);
 }
-.pc-glass--dark { background-color: var(--pc-glass-tint-dark); }
 
 /* Recessed well inside a glass panel — dark inset chrome shared by toggle
    rows and swatch/pattern grids. Grid sites override radius, padding and
@@ -119,15 +122,15 @@
   font-weight: 800;
   letter-spacing: var(--pc-tr-caps);
   text-transform: uppercase;
-  color: var(--pc-paper);
-  text-shadow: 0 1px 0 rgba(0,0,0,0.15);
+  color: var(--pc-ink);
+  text-shadow: none;
 }
 .pc-mode-label {
   font-family: var(--pc-font-display);
   font-weight: 800;
   letter-spacing: var(--pc-tr-mode);
   text-transform: uppercase;
-  color: var(--pc-paper);
+  color: var(--pc-ink);
 }
 .pc-mode-label--active {
   color: var(--pc-cyan-glow);
@@ -136,31 +139,31 @@
 .pc-money {
   font-family: var(--pc-font-display);
   font-weight: 700;
-  color: var(--pc-money);
+  color: var(--pc-ink);
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.18);
+  text-shadow: none;
 }
 .pc-body {
   font-family: var(--pc-font-body);
   font-weight: 500;
-  color: var(--pc-paper);
+  color: var(--pc-ink);
 }
 .pc-blurb {
   font-family: var(--pc-font-body);
   font-weight: 500;
-  color: var(--pc-paper-soft);
+  color: var(--pc-ink-soft);
 }
 
 /* ===========================================================
    Tile recipes — used by panel tiles + buttons
    =========================================================== */
 .pc-tile {
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.20);
   border-radius: var(--pc-r-md);
   box-shadow: var(--pc-shadow-tile);
-  color: var(--pc-paper);
+  color: var(--pc-ink);
   transition:
     transform var(--pc-t-micro) var(--pc-ease-snap),
     background var(--pc-t-micro) var(--pc-ease-snap),
@@ -168,8 +171,8 @@
     border-color var(--pc-t-micro) var(--pc-ease-snap);
 }
 .pc-tile:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.28);
-  border-color: rgba(127, 243, 255, 0.45);
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.45);
   transform: translateY(-2px);
 }
 .pc-tile:active:not(:disabled) {
@@ -188,12 +191,23 @@
   transform: translateY(-2px);
 }
 .pc-tile--ghost {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px dashed rgba(15, 23, 42, 0.18);
   box-shadow: none;
   cursor: default;
 }
 .pc-tile--ghost:hover { background: rgba(255, 255, 255, 0.06); transform: none; }
+
+/* Light glass panels use dark text; restore the light HUD palette inside
+   explicitly dark overlays such as the sidebar and modal dialogs. */
+.pc-glass--dark .pc-hud-header,
+.pc-glass--dark .pc-mode-label,
+.pc-glass--dark .pc-money,
+.pc-glass--dark .pc-body,
+.pc-glass--dark .pc-tile {
+  color: var(--pc-paper);
+}
+.pc-glass--dark .pc-blurb { color: var(--pc-paper-soft); }
 
 /* Selected halo helper for selected catalog tiles in BUY mode */
 .pc-halo-pulse {

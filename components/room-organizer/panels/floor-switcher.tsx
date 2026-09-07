@@ -126,7 +126,10 @@ export function FloorSwitcher(): JSX.Element {
             >
               <button
                 type="button"
-                onClick={() => actions.setActiveFloorIndex(index)}
+                onClick={() => {
+                  actions.setActiveFloorIndex(index);
+                  if (view.showAllFloors) toggle('showAllFloors');
+                }}
                 className={`pc-tile${isActive ? ' pc-tile--active' : ''}`}
                 aria-current={isActive ? 'true' : undefined}
                 style={{

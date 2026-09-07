@@ -147,6 +147,9 @@ function isIntendedStack(a: FurnitureItem, b: FurnitureItem): boolean {
  * template (rug under sofa) red on load.
  */
 function pairCollides(a: FurnitureItem, b: FurnitureItem): boolean {
+  const aBottom = a.elevation ?? 0;
+  const bBottom = b.elevation ?? 0;
+  if (aBottom + a.height <= bBottom + 0.01 || bBottom + b.height <= aBottom + 0.01) return false;
   if (CEILING_MOUNTED_TYPES.has(a.type) || CEILING_MOUNTED_TYPES.has(b.type)) return false;
   if (isWallMounted(a.type) !== isWallMounted(b.type)) return false;
   if (isLowProfile(a) || isLowProfile(b)) return false;

@@ -45,7 +45,9 @@ export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element 
           aria-label={`${item.name} düzenle`}
       style={{
         position: 'absolute',
-        top: 130,
+        // Keep the editor below the top-right upload, floor, and wall controls
+        // so those controls never cover the item name or action row.
+        top: 248,
         right: 16,
         width: 296,
         padding: 0,
@@ -246,6 +248,17 @@ export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element 
               uppercaseLabel={false}
             />
           ))}
+          <SliderRow
+            label="Y"
+            min={0}
+            max={3}
+            step={0.05}
+            value={item.elevation ?? 0}
+            format={(v) => `${v.toFixed(2)} m`}
+            onChange={(value) => actions.updateItem(item.id, { elevation: value })}
+            labelWidth={14}
+            uppercaseLabel={false}
+          />
         </div>
 
         {item.type === 'sofa' && (
@@ -269,7 +282,7 @@ export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element 
 
         <ColorSwatchPicker
           variant="glass"
-          value={item.color}
+          value={item.color || '#cbd5e1'}
           swatches={COLOR_SWATCHES.slice(0, 8)}
           recent={recentColors.slice(0, 6)}
           onChange={(color) => actions.setColor(item.id, color)}

@@ -166,7 +166,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
 
       // Near plane pulled from 0.1 to 0.3 for better depth precision. The
       // walkthrough eye height is ~1.6m so 0.3 never clips near geometry.
-      const camera = new THREE.PerspectiveCamera(58, canvas.clientWidth / canvas.clientHeight, 0.3, 1000);
+      const camera = new THREE.PerspectiveCamera(58, canvas.clientWidth / canvas.clientHeight, 0.05, 1000);
       // Office-first overview: comfortably frames the 18×12 m starter floor
       // without the strong wide-angle distortion of the previous house view.
       camera.position.set(11.5, 14.5, 14);
@@ -219,7 +219,12 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
-      controls.maxPolarAngle = Math.PI / 2.5;
+      controls.enablePan = true;
+      controls.minDistance = 0.25;
+      controls.maxDistance = 100;
+      controls.zoomToCursor = true;
+      controls.minPolarAngle = 0.05;
+      controls.maxPolarAngle = Math.PI - 0.05;
       controls.screenSpacePanning = true;
       controlsRef.current = controls;
       cleanup.push(() => {
@@ -237,6 +242,12 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       let rafId = 0;
       const tick = () => {
         rafId = requestAnimationFrame(tick);
+        // Keep the comfortable overview angle while the camera is far away.
+        // As the user zooms into a floor, gradually unlock a steeper orbit so
+        // the ceiling can be inspected without changing the wide overview.
+        const orbitDistance = camera.position.distanceTo(controls.target);
+        const zoomProgress = Math.max(0, Math.min(1, (14 - orbitDistance) / 12));
+        controls.maxPolarAngle = Math.PI / 2.5 + zoomProgress * (Math.PI - 0.05 - Math.PI / 2.5);
         // OrbitControls.update() returns true while the camera is moving
         // (including damping glide). Skip rendering entirely when nothing
         // changed — an editor sits idle most of the time.

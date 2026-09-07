@@ -2,7 +2,9 @@ import { useEffect, useMemo, type RefObject, type MutableRefObject } from 'react
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { addFloorPlanRepaintHandler, render2DTopDown } from '../canvas-2d/render';
 import { hasCollisions } from '../lib/geometry';
+import { scheduleAssetLoad } from '../lib/asset-load-queue';
 import { isRtlsPersonItem } from '../lib/rtls-person-items';
+import { useCatalogRegistry } from '../lib/catalog-registry';
 import { FLOOR_HEIGHT_METERS } from '../lib/types';
 import { disposeObject, removeAndDispose } from '../three/builder-utils';
 import { addVisionCones } from '../three/camera-vision';
@@ -15,6 +17,7 @@ import {
   renderInteriorWalls,
   renderInteriorWallPreview,
 } from '../three/interior-walls';
+import { clearRoomFloorZones, renderRoomFloorZones } from '../three/room-floor-zones';
 import { clearItemLabels, renderItemLabels } from '../three/item-labels';
 import { applyTimeOfDay } from '../three/lighting';
 import { clearMeasurement, renderMeasurement } from '../three/measurement';
@@ -46,11 +49,21 @@ const GLTF_ASSET_PATHS: Record<string, string> = {
 
 const gltfCache = new Map<string, Promise<ThreeNS.Object3D | null>>();
 
-function loadGltfAsset(path: string): Promise<ThreeNS.Object3D | null> {
+function isCatalogItemAvailable(
+  item: FloorLayout['items'][number],
+  catalog: readonly import('../lib/types').CatalogItem[]
+): boolean {
+  if (item.customModelId) {
+    return catalog.some((entry) => entry.customModelId === item.customModelId);
+  }
+  return catalog.some((entry) => entry.type === item.type && !entry.customModelId);
+}
+
+function loadGltfAsset(path: string, priority = 0): Promise<ThreeNS.Object3D | null> {
   const cached = gltfCache.get(path);
   if (cached) return cached;
-  const promise = new GLTFLoader().loadAsync(path)
-    .then((gltf) => gltf.scene)
+  const promise = scheduleAssetLoad(`catalog:${path}`, priority, () => new GLTFLoader().loadAsync(path)
+    .then((gltf) => gltf.scene))
     .catch(() => null);
   gltfCache.set(path, promise);
   return promise;
@@ -87,7 +100,7 @@ interface MeshLike {
   material?: MaterialLike | readonly MaterialLike[] | null;
 }
 
-function ghostifyGroup(group: import('three').Object3D, opacity = 0.3): void {
+function ghostifyGroup(group: import('three').Object3D, opacity = 0.12): void {
   group.traverse((node) => {
     const material = (node as MeshLike).material;
     if (!material) return;
@@ -100,6 +113,20 @@ function ghostifyGroup(group: import('three').Object3D, opacity = 0.3): void {
     } else {
       apply(material as MaterialLike);
     }
+  });
+}
+
+function updateCeilingLightVisibility(
+  THREE: typeof import('three'),
+  scene: import('three').Scene,
+  camera: import('three').PerspectiveCamera,
+): void {
+  const direction = camera.getWorldDirection(new THREE.Vector3());
+  const lookingAtCeiling = direction.y > 0.12;
+  scene.traverse((node) => {
+    if (node.userData.ceilingLight !== true) return;
+    const floorY = Number(node.userData.floorY ?? 0);
+    node.visible = lookingAtCeiling && camera.position.y < floorY + 2.9;
   });
 }
 
@@ -124,10 +151,14 @@ export interface UseSceneEffectsParams {
   highlightedIds: ReadonlySet<string>;
   selectedWall: { id: string; kind: 'exterior' | 'interior' } | null;
   wallDraft: { x: number; z: number } | null;
+  pointerWorld: { x: number; z: number } | null;
   wallSnapResult: { point: { x: number; z: number }; kind: string } | null;
   measurementPoints: ReadonlyArray<{ x: number; z: number }>;
   digitalTwinLayers?: DigitalTwinLayerState;
   digitalTwinDevices?: readonly { id: string; x: number; z: number; status: string; battery: number }[];
+  planZoom?: number;
+  planPanX?: number;
+  planPanY?: number;
 }
 
 export function useSceneEffects({
@@ -149,13 +180,25 @@ export function useSceneEffects({
   highlightedIds,
   selectedWall,
   wallDraft,
+  pointerWorld,
   wallSnapResult,
   measurementPoints,
   digitalTwinLayers,
   digitalTwinDevices,
+  planZoom = 1,
+  planPanX = 0,
+  planPanY = 0,
 }: UseSceneEffectsParams): void {
   const activeFloorY = activeFloorIndex * FLOOR_HEIGHT_METERS;
   const digitalTwinLiveMode = digitalTwinDevices !== undefined;
+  const catalog = useCatalogRegistry();
+  const visibleActiveFloor = useMemo<FloorLayout>(
+    () => ({
+      ...activeFloor,
+      items: activeFloor.items.filter((item) => isCatalogItemAvailable(item, catalog)),
+    }),
+    [activeFloor, catalog]
+  );
 
   // Serialized signatures of exactly the item-derived inputs the structural
   // effects consume. `layout.floors` gets a new identity on every item action,
@@ -275,7 +318,7 @@ export function useSceneEffects({
         floorPlanFitMode: layout.floorPlanFitMode ?? 'stretch',
         floorPlan3DEffect: view.floorPlan3DEffect,
         yOffset: index * FLOOR_HEIGHT_METERS,
-        ghostOpacity: view.showAllFloors && !isActive ? 0.25 : undefined,
+        ghostOpacity: view.showAllFloors && !isActive ? 0.10 : undefined,
         onTextureLoaded: invalidate,
       });
     }
@@ -317,13 +360,20 @@ export function useSceneEffects({
     // interaction frame, and the RAF loop renders that same frame anyway, so a
     // direct render would draw the full scene twice per frame while orbiting.
     const apply = () => {
+      // Never allow the orbit camera to pass below the active floor. This
+      // prevents seeing the underside of the plan while still allowing the
+      // user to orbit upward and inspect the ceiling.
+      const minimumCameraY = activeFloorY + 0.05;
+      if (camera.position.y < minimumCameraY) camera.position.y = minimumCameraY;
       applyWallDisplay(scene, camera.position.x, camera.position.z, view.wallDisplay, layout.width, layout.height);
+      const THREE = threeModuleRef.current;
+      if (THREE) updateCeilingLightVisibility(THREE, scene, camera);
       invalidate();
     };
     apply();
     controls.addEventListener('change', apply);
     return () => controls.removeEventListener('change', apply);
-  }, [isReady, invalidate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, view.wallDisplay, layout.width, layout.height]);
+  }, [isReady, invalidate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, view.wallDisplay, layout.width, layout.height, activeFloorY]);
 
   // Furniture meshes
   useEffect(() => {
@@ -362,19 +412,23 @@ export function useSceneEffects({
     for (const { floor, index } of floorsToRender) {
       const isActive = index === activeFloorIndex;
       const floorY = index * FLOOR_HEIGHT_METERS;
+      const visibleItems = floor.items.filter((item) => isCatalogItemAvailable(item, catalog));
 
-      for (const item of floor.items) {
+      for (const item of visibleItems) {
         if (!item.position) continue;
         // In RTLS live mode the placed person items become moving tracked
         // avatars. Do not also render their static editor copies underneath.
         if (digitalTwinLiveMode && isRtlsPersonItem(item)) continue;
 
-        const collision = hasCollisions(item, floor.items, layout.width, layout.height);
-        const group = createFurnitureModel(THREE, item, collision);
-        group.position.set(item.position.x, floorY, item.position.z);
+        // Overlapping items keep their own materials; collision detection is
+        // still calculated for editor logic but is no longer shown in red.
+        const group = createFurnitureModel(THREE, item, false);
+        group.position.set(item.position.x, floorY + (item.elevation ?? 0), item.position.z);
         group.rotation.y = item.rotation ?? 0;
         if (item.mirrored) group.scale.x = -1;
         group.userData.type = ROOM_OBJECT_TAGS.Furniture;
+        group.userData.ceilingLight = item.type === 'ceiling-panel-light';
+        group.userData.floorY = floorY;
         group.userData.id = item.id;
         group.userData.floorIndex = index;
         group.userData.locked = item.locked === true || !isActive;
@@ -387,9 +441,15 @@ export function useSceneEffects({
         }
 
         scene.add(group);
+        const camera = cameraRef.current;
+        const distance = camera && item.position
+          ? Math.hypot(item.position.x - camera.position.x, floorY - camera.position.y, item.position.z - camera.position.z)
+          : 100;
+        const visualPriority = (item.width * item.depth * item.height) / (distance + 2) + (isActive ? 1 : 0);
 
         if (item.customModelId) {
-          void loadStoredCustomGltfAsset(item.customModelId).then((source) => {
+          const assetKey = item.customModelUrl ?? item.customModelId;
+          void scheduleAssetLoad(`custom:${assetKey}`, visualPriority, () => loadStoredCustomGltfAsset(assetKey)).then((source) => {
             if (!source || disposed || !group.parent) return;
             for (const child of [...group.children]) {
               group.remove(child);
@@ -431,7 +491,7 @@ export function useSceneEffects({
         } else {
           const assetPath = GLTF_ASSET_PATHS[item.type];
           if (assetPath) {
-            void loadGltfAsset(assetPath).then((source) => {
+            void loadGltfAsset(assetPath, visualPriority).then((source) => {
               if (!source || disposed || !group.parent) return;
               for (const child of [...group.children]) {
                 group.remove(child);
@@ -451,6 +511,7 @@ export function useSceneEffects({
     // shadow map now that shadow casters were added/removed/moved.
     scene.userData[FURNITURE_REVISION_KEY] =
       ((scene.userData[FURNITURE_REVISION_KEY] as number | undefined) ?? 0) + 1;
+    if (cameraRef.current) updateCeilingLightVisibility(THREE, scene, cameraRef.current);
     requestShadowUpdate();
     return () => {
       disposed = true;
@@ -464,7 +525,7 @@ export function useSceneEffects({
   }, [
     isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef,
     layout.floors, layout.width, layout.height,
-    activeFloor, activeFloorIndex, view.showAllFloors, digitalTwinLiveMode,
+    activeFloor, activeFloorIndex, view.showAllFloors, digitalTwinLiveMode, catalog,
   ]);
 
   // Selection / highlight outlines. Kept out of the furniture effect above so
@@ -501,12 +562,9 @@ export function useSceneEffects({
       if (!item) continue;
 
       const isSelected = selectedItemId === id || extraSelectedIds.has(id);
-      const collision = hasCollisions(item, activeFloor.items, layout.width, layout.height);
       const accent = isSelected
         ? selectedItemId === id
-          ? collision
-            ? 0xff6666
-            : 0x00ff00
+          ? 0x00ff00
           : 0x42a5f5
         : 0xfacc15;
       const geometry = new THREE.BoxGeometry(item.width, item.height, item.depth);
@@ -588,6 +646,42 @@ export function useSceneEffects({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, view.timeOfDay, lampsKey]);
 
+  // Apply the user-selected background after the time-of-day sky effect. The
+  // custom image is kept as a scene texture so the opaque WebGL canvas can
+  // display it behind the building.
+  useEffect(() => {
+    invalidate();
+    if (!isReady) return undefined;
+    const THREE = threeModuleRef.current;
+    const scene = sceneRef.current;
+    if (!THREE || !scene) return undefined;
+
+    const previous = scene.userData.customBackgroundTexture as ThreeNS.Texture | undefined;
+    previous?.dispose();
+    scene.userData.customBackgroundTexture = undefined;
+
+    if (!view.backgroundImage) {
+      scene.background = new THREE.Color(view.backgroundColor);
+      invalidate();
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loader = new THREE.TextureLoader();
+    loader.load(view.backgroundImage, (texture) => {
+      if (cancelled) {
+        texture.dispose();
+        return;
+      }
+      texture.colorSpace = THREE.SRGBColorSpace;
+      scene.background = texture;
+      scene.userData.customBackgroundTexture = texture;
+      invalidate();
+    });
+
+    return () => { cancelled = true; };
+  }, [isReady, invalidate, threeModuleRef, sceneRef, view.backgroundColor, view.backgroundImage, view.timeOfDay]);
+
   // Outdoor
   useEffect(() => {
     invalidate();
@@ -610,6 +704,7 @@ export function useSceneEffects({
     if (!THREE || !scene) return;
 
     clearInteriorWalls(scene);
+    clearRoomFloorZones(scene);
     const floorsToRender = view.showAllFloors
       ? layout.floors.map((floor, index) => ({ floor, index }))
       : [{ floor: activeFloor, index: activeFloorIndex }];
@@ -621,9 +716,16 @@ export function useSceneEffects({
       renderInteriorWalls(
         THREE, scene, walls,
         index * FLOOR_HEIGHT_METERS,
-        view.showAllFloors && !isActive ? 0.25 : undefined,
+      view.showAllFloors && !isActive ? 0.10 : undefined,
         { openingCandidates: floor.items, roomWidth: layout.width, roomDepth: layout.height }
       );
+      renderRoomFloorZones(THREE, scene, walls, index * FLOOR_HEIGHT_METERS, {
+        floorColor: floor.floorColor,
+        floorPattern: floor.floorPattern,
+        roomWidth: layout.width,
+        roomDepth: layout.height,
+        ghostOpacity: view.showAllFloors && !isActive ? 0.10 : undefined,
+      });
     }
     // Interior walls cast shadows — recompute the static shadow map after any
     // add/remove/re-extrude so their cast shadows don't go stale.
@@ -632,7 +734,7 @@ export function useSceneEffects({
     // door/window opening candidates only; the two keys cover exactly that,
     // so a furniture edit doesn't re-extrude every interior wall.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, interiorWallsKey, wallOpeningsKey, activeFloorIndex, view.showAllFloors, layout.width, layout.height]);
+  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, interiorWallsKey, wallOpeningsKey, activeFloorIndex, view.showAllFloors, view.view2D, layout.width, layout.height]);
 
   // Cyan outline on selected wall. Declared AFTER the shell + interior-wall
   // rebuild effects and keyed on the same rebuild keys, so it always snapshots
@@ -713,8 +815,8 @@ export function useSceneEffects({
       clearItemLabels(scene);
       return;
     }
-    renderItemLabels(THREE, scene, activeFloor.items, activeFloorY);
-  }, [isReady, invalidate, threeModuleRef, sceneRef, view.showItemLabels, activeFloor.items, activeFloorY]);
+    renderItemLabels(THREE, scene, visibleActiveFloor.items, activeFloorY);
+  }, [isReady, invalidate, threeModuleRef, sceneRef, view.showItemLabels, visibleActiveFloor.items, activeFloorY]);
 
   // Roof
   useEffect(() => {
@@ -782,7 +884,7 @@ export function useSceneEffects({
       render2DTopDown({
         canvas,
         layout,
-        floor: activeFloor,
+        floor: visibleActiveFloor,
         selectedItemId,
         extraSelectedIds,
         showMeasurements: view.showMeasurements,
@@ -792,11 +894,21 @@ export function useSceneEffects({
         showPaths: digitalTwinLayers?.paths ?? false,
         showDigitalTwinLabels: digitalTwinLayers?.labels ?? false,
         trackedDevices: digitalTwinLayers?.devices ? digitalTwinDevices : undefined,
-        hasCollision: (item) => hasCollisions(item, activeFloor.items, layout.width, layout.height),
+        hasCollision: (item) => hasCollisions(item, visibleActiveFloor.items, layout.width, layout.height),
+        zoom: planZoom,
+        panX: planPanX,
+        panY: planPanY,
+        backgroundColor: view.backgroundColor,
+        backgroundImage: view.backgroundImage,
+        wallPreview:
+          view.drawWallMode && wallDraft && pointerWorld
+            ? { start: wallDraft, end: pointerWorld }
+            : null,
       });
     };
 
     const removeRepaintHandler = addFloorPlanRepaintHandler(paint);
+    window.addEventListener('catalog-thumbnails-ready', paint);
     paint();
 
     const observer = new ResizeObserver(paint);
@@ -804,9 +916,10 @@ export function useSceneEffects({
 
     return () => {
       observer.disconnect();
+      window.removeEventListener('catalog-thumbnails-ready', paint);
       removeRepaintHandler();
     };
-  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, digitalTwinLayers, digitalTwinDevices, layout, activeFloor, selectedItemId, extraSelectedIds]);
+  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, selectedItemId, extraSelectedIds, planZoom, planPanX, planPanY, wallDraft, pointerWorld]);
 }
 
 export { measurementDistance } from '../three/measurement';

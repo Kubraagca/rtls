@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import { worldPositionFrom2DClient } from './canvas-2d/render';
 import { RoomEditorProvider, type RoomEditorContextValue } from './contexts/room-editor-context';
 import { SelectionProvider, type SelectionContextValue } from './contexts/selection-context';
@@ -25,6 +26,7 @@ import { hasCollisions } from './lib/geometry';
 import { reseatWallMountedItem, settleWallMountedItem } from './lib/opening-snap';
 import { playSound, type SoundCue } from './lib/sounds';
 import { FLOOR_HEIGHT_METERS } from './lib/types';
+import { removeCatalogItem, updateCatalogItem } from './lib/catalog-registry';
 import { snapWallEndpoint } from './lib/wall-snap';
 import { BottomHud } from './panels/bottom-hud';
 import { CustomGlbUpload } from './panels/custom-glb-upload';
@@ -32,6 +34,7 @@ import { FloorPill } from './panels/floor-pill';
 import { HeaderStats } from './panels/header-stats';
 import { ItemContextPopover } from './panels/item-context-popover';
 import { LotBadge } from './panels/lot-badge';
+import { ModePanel } from './panels/mode-panel';
 import { SidebarDrawer } from './panels/sidebar-drawer';
 import { TouchModeToggle } from './panels/touch-mode-toggle';
 import { TwinzoLiveHud } from './panels/twinzo-live-hud';
@@ -40,7 +43,7 @@ import { WallDisplayPill } from './panels/wall-display-pill';
 import { WelcomeBanner } from './panels/welcome-banner';
 import type { HoverInfo } from './hooks/use-three-scene';
 import type { GameMode } from './lib/types';
-import type { RoomLayout, ViewSettings, WallId } from './lib/types';
+import type { CatalogItem, RoomLayout, ViewSettings, WallId } from './lib/types';
 
 function orbitCamera(
   THREE: typeof import('three'),
@@ -76,15 +79,28 @@ function zoomCamera(
   direction: '+' | '-'
 ): void {
   const offset = camera.position.clone().sub(controls.target);
-  const factor = direction === '+' ? 0.85 : 1.18;
+  const factor = direction === '+' ? 0.72 : 1.32;
   offset.multiplyScalar(factor);
+  const distance = Math.max(0.8, Math.min(100, offset.length()));
+  offset.setLength(distance);
   camera.position.copy(controls.target).add(offset);
   controls.update();
+}
+
+function distanceToSegment(point: { x: number; z: number }, wall: { x1: number; z1: number; x2: number; z2: number }): number {
+  const dx = wall.x2 - wall.x1;
+  const dz = wall.z2 - wall.z1;
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared === 0) return Math.hypot(point.x - wall.x1, point.z - wall.z1);
+  const t = Math.max(0, Math.min(1, ((point.x - wall.x1) * dx + (point.z - wall.z1) * dz) / lengthSquared));
+  return Math.hypot(point.x - (wall.x1 + t * dx), point.z - (wall.z1 + t * dz));
 }
 
 
 const INITIAL_VIEW_SETTINGS: ViewSettings = {
   view2D: false,
+  backgroundColor: '#dceefb',
+  backgroundImage: null,
   showMeasurements: true,
   showWiFiSignals: false,
   snapToGrid: true,
@@ -114,6 +130,7 @@ export function RoomOrganizer(): JSX.Element {
   const activeFloorY = activeFloorIndex * FLOOR_HEIGHT_METERS;
   const { recent: recentColors, pushColor } = useRecentColors();
   const [view, setView] = useState<ViewSettings>(INITIAL_VIEW_SETTINGS);
+  const [planCamera, setPlanCamera] = useState({ zoom: 1, panX: 0, panY: 0 });
 
   // First-person walkthrough only runs in the 3D view; the 2D top-down renderer
   // has no PointerLockControls. This single signal gates walkthrough-aware
@@ -186,7 +203,7 @@ export function RoomOrganizer(): JSX.Element {
   }, [activeFloor.items, layout.width, layout.height]);
 
   const handleEmptyClick = useCallback(
-    (x: number, z: number) => {
+    (x: number, z: number, chainWall = true, snap = true, clampToRoom = snap) => {
       if (view.drawWallMode) {
         const snapped = snapWallEndpoint({
           point: { x, z },
@@ -194,6 +211,10 @@ export function RoomOrganizer(): JSX.Element {
           fromPoint: wallDraft,
           roomWidth: layout.width,
           roomDepth: layout.height,
+          // 2D clicks should land exactly where the cursor is. The 3D
+          // workflow keeps vertex/right-angle snapping for room outlines.
+          snapDistance: snap ? undefined : 0,
+          clampToRoom,
         });
         if (!wallDraft) {
           setWallDraft(snapped.point);
@@ -213,8 +234,9 @@ export function RoomOrganizer(): JSX.Element {
           x2: snapped.point.x,
           z2: snapped.point.z,
         });
-        // Chain: keep the just-placed endpoint as the start of the next wall.
-        setWallDraft(snapped.point);
+        // The 2D editor uses exactly two clicks per wall. The 3D workflow
+        // keeps chaining from the last endpoint for quick room outlines.
+        setWallDraft(chainWall ? snapped.point : null);
         return;
       }
       if (view.measurementMode) {
@@ -242,6 +264,66 @@ export function RoomOrganizer(): JSX.Element {
   const handleFloorPointerLeave = useCallback(() => {
     setPointerWorld(null);
   }, []);
+
+  const handle2DWheel = useCallback(
+    (deltaY: number, clientX: number, clientY: number) => {
+      const canvas = canvas2DRef.current;
+      if (!canvas) return;
+      const previousZoom = planCamera.zoom;
+      const nextZoom = Math.max(0.5, Math.min(4, previousZoom * (deltaY < 0 ? 1.12 : 0.89)));
+      if (nextZoom === previousZoom) return;
+
+      // Keep the point under the cursor fixed while zooming, so the plan feels
+      // like a real editor instead of zooming away from the user's focus.
+      const point = worldPositionFrom2DClient(canvas, layout, clientX, clientY, planCamera);
+      if (!point) {
+        setPlanCamera((current) => ({ ...current, zoom: nextZoom }));
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const padding = 60;
+      const baseScale = Math.min(
+        (rect.width - padding * 2) / layout.width,
+        (rect.height - padding * 2) / layout.height
+      );
+      const localX = clientX - rect.left;
+      const localY = clientY - rect.top;
+      const baseOffsetX = (rect.width - layout.width * baseScale * nextZoom) / 2;
+      const baseOffsetY = (rect.height - layout.height * baseScale * nextZoom) / 2;
+      setPlanCamera({
+        zoom: nextZoom,
+        panX: localX - baseOffsetX - (point.x + layout.width / 2) * baseScale * nextZoom,
+        panY: localY - baseOffsetY - (point.z + layout.height / 2) * baseScale * nextZoom,
+      });
+    },
+    [layout, planCamera]
+  );
+
+  const handle2DWallSelect = useCallback((clientX: number, clientY: number) => {
+    if (view.drawWallMode) return;
+    const canvas = canvas2DRef.current;
+    if (!canvas) return;
+    const point = worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true });
+    if (!point) return;
+    const rect = canvas.getBoundingClientRect();
+    const baseScale = Math.min(
+      (rect.width - 120) / layout.width,
+      (rect.height - 120) / layout.height
+    );
+    const tolerance = Math.max(0.12, 9 / Math.max(1, baseScale * planCamera.zoom));
+    let nearest: { id: string; distance: number } | null = null;
+    for (const wall of activeFloor.interiorWalls ?? []) {
+      const distance = distanceToSegment(point, wall);
+      if (distance <= tolerance && (!nearest || distance < nearest.distance)) {
+        nearest = { id: wall.id, distance };
+      }
+    }
+    setSelectedWall(nearest ? { id: nearest.id, kind: 'interior' } : null);
+    if (nearest) {
+      setSelectedItemId(null);
+      setExtraSelectedIds(new Set());
+    }
+  }, [activeFloor.interiorWalls, layout, planCamera, view.drawWallMode]);
 
   // Reset wall draft + wall selection whenever draw mode flips off.
   useEffect(() => {
@@ -440,6 +522,31 @@ export function RoomOrganizer(): JSX.Element {
     [actions, playCue]
   );
 
+  const removeCatalogItemAndPlacements = useCallback((catalogItem: CatalogItem) => {
+    const catalogKey = catalogItem.customModelId ?? catalogItem.type;
+    layout.floors.forEach((floor) => {
+      floor.items
+        .filter((item) => (item.customModelId ?? item.type) === catalogKey)
+        .forEach((item) => removeItem(item.id));
+    });
+    removeCatalogItem(catalogItem);
+  }, [layout.floors, removeItem]);
+
+  const updateCatalogItemAndPlacements = useCallback((catalogItem: CatalogItem) => {
+    const catalogKey = catalogItem.customModelId ?? catalogItem.type;
+    layout.floors.forEach((floor) => {
+      floor.items
+        .filter((item) => (item.customModelId ?? item.type) === catalogKey)
+        .forEach((item) => actions.updateItem(item.id, {
+          name: catalogItem.name,
+          category: catalogItem.category,
+          price: catalogItem.price,
+          customThumbnail: catalogItem.customThumbnail,
+        }));
+    });
+    updateCatalogItem(catalogItem);
+  }, [actions, layout.floors]);
+
   const removeSelected = useCallback(() => {
     if (allSelectedIds.size === 0) return;
     // Locked items survive a group delete — the same immunity the single-item
@@ -481,6 +588,16 @@ export function RoomOrganizer(): JSX.Element {
     },
     [actions]
   ));
+
+  // Undo is scoped to the current editor surface. A snapshot created in the
+  // 3D editor must not be replayed while the user is working in 2D (and vice
+  // versa), because both views share the same layout state.
+  const historyViewRef = useRef(view.view2D);
+  useEffect(() => {
+    if (historyViewRef.current === view.view2D) return;
+    historyViewRef.current = view.view2D;
+    history.clear();
+  }, [view.view2D, history]);
 
   const { lastSavedAt, saving: isSaving, saveError } = useLayoutPersistence({
     layout,
@@ -573,10 +690,14 @@ export function RoomOrganizer(): JSX.Element {
     highlightedIds,
     selectedWall,
     wallDraft,
+    pointerWorld,
     wallSnapResult,
     measurementPoints,
     digitalTwinLayers: gameMode === 'live' ? liveLayers : undefined,
     digitalTwinDevices: gameMode === 'live' ? liveDevices : undefined,
+    planZoom: planCamera.zoom,
+    planPanX: planCamera.panX,
+    planPanY: planCamera.panY,
   });
 
   useDigitalTwinOverlays({
@@ -873,6 +994,7 @@ export function RoomOrganizer(): JSX.Element {
         isReady={isReady}
         error={error}
         view2D={view.view2D}
+        drawWallMode={view.drawWallMode}
         layout={layout}
         activeFloor={activeFloor}
         selectedItem={selectedItem}
@@ -899,11 +1021,22 @@ export function RoomOrganizer(): JSX.Element {
         }
         canvasRef={canvasRef}
         canvas2DRef={canvas2DRef}
-        on2DClick={(clientX, clientY) => {
+        backgroundColor={view.backgroundColor}
+        backgroundImage={view.backgroundImage}
+        on2DMouseDown={(clientX, clientY) => {
           const canvas = canvas2DRef.current;
-          const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY) : null;
-          if (point) handleEmptyClick(point.x, point.z);
+          const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
+          if (point) handleEmptyClick(point.x, point.z, true, true, false);
         }}
+        on2DClick={handle2DWallSelect}
+        on2DMouseMove={(clientX, clientY) => {
+          if (!view.drawWallMode) return;
+          const canvas = canvas2DRef.current;
+          const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
+          setPointerWorld(point);
+        }}
+        on2DMouseLeave={() => setPointerWorld(null)}
+        on2DWheel={handle2DWheel}
         hover={
           hover &&
           (() => {
@@ -911,8 +1044,14 @@ export function RoomOrganizer(): JSX.Element {
             return item ? { item, clientX: hover.clientX, clientY: hover.clientY } : null;
           })()
         }
-        onCatalogDrop={(clientX, clientY, type) => {
-          const item = FURNITURE_CATALOG.find((entry) => entry.type === type);
+        onCatalogDrop={(clientX, clientY, payload) => {
+          let item: CatalogItem | undefined;
+          try {
+            const parsed = JSON.parse(payload) as CatalogItem;
+            if (parsed.type && parsed.name && parsed.width && parsed.depth && parsed.height) item = parsed;
+          } catch {
+            item = FURNITURE_CATALOG.find((entry) => entry.type === payload);
+          }
           if (!item) return;
           const world = worldPositionFromClient(clientX, clientY);
           const newId = placeCatalogItem(item, world ?? undefined);
@@ -939,15 +1078,32 @@ export function RoomOrganizer(): JSX.Element {
           maxWidth: 'calc(100vw - 480px)',
         }}
       >
-        <div
-          className="pc-glass pc-glass--dark"
-          style={{ padding: '8px 12px' }}
-        >
-          <HeaderStats
-            lastSavedAt={lastSavedAt}
-            saving={isSaving}
-            saveError={saveError}
-          />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            className="pc-glass pc-glass--dark"
+            style={{ padding: '8px 12px' }}
+          >
+            <HeaderStats
+              lastSavedAt={lastSavedAt}
+              saving={isSaving}
+              saveError={saveError}
+            />
+          </div>
+          <div className="pc-glass pc-glass--dark" style={{ display: 'flex', gap: 6, padding: 5, borderRadius: 12 }}>
+            {view.view2D && <button
+              type="button"
+              className={`pc-tile${view.drawWallMode ? ' pc-tile--active' : ''}`}
+              onClick={() => setView((v) => ({ ...v, drawWallMode: !v.drawWallMode }))}
+              aria-pressed={view.drawWallMode}
+              title="Duvar çiz"
+              style={{ height: 34, padding: '0 10px', borderRadius: 9, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800 }}
+            >
+              <Pencil size={13} strokeWidth={2.2} />
+              DUVAR ÇİZ
+            </button>}
+            <button type="button" className="pc-tile" onClick={history.undo} disabled={!history.canUndo} title="Geri al" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 18, opacity: history.canUndo ? 1 : 0.4 }}>↶</button>
+            <button type="button" className="pc-tile" onClick={history.redo} disabled={!history.canRedo} title="İleri al" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 18, opacity: history.canRedo ? 1 : 0.4 }}>↷</button>
+          </div>
         </div>
       </div>}
 
@@ -978,10 +1134,11 @@ export function RoomOrganizer(): JSX.Element {
             invalidate();
           }}
         />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button
           type="button"
           className="pc-glass pc-glass--dark pc-tile"
-          onClick={() => setView((v) => ({ ...v, view2D: !v.view2D, walkthroughMode: false }))}
+          onClick={() => setView((v) => ({ ...v, view2D: !v.view2D, drawWallMode: v.view2D ? false : v.drawWallMode, walkthroughMode: false }))}
           style={{
             padding: '8px 12px',
             borderRadius: 10,
@@ -993,9 +1150,81 @@ export function RoomOrganizer(): JSX.Element {
         >
           {view.view2D ? '3D Görünüm' : '2D Plan'}
         </button>
+        {view.view2D && <button
+          type="button"
+          className={`hidden pc-glass pc-glass--dark pc-tile${view.drawWallMode ? ' pc-tile--active' : ''}`}
+          onClick={() => setView((v) => ({ ...v, drawWallMode: !v.drawWallMode }))}
+          aria-pressed={view.drawWallMode}
+          title="2D planda iki tıklamayla duvar çiz"
+          style={{
+            padding: '8px 12px',
+            borderRadius: 10,
+            fontFamily: 'var(--pc-font-display)',
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Pencil size={13} strokeWidth={2.2} />
+            {view.drawWallMode ? 'DUVARI BİTİR' : 'DUVAR ÇİZ'}
+          </span>
+        </button>}
+        <div className="pc-top-right-actions" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className="pc-glass pc-glass--dark pc-tile"
+            onClick={() => {
+              setGameMode('live');
+              setView((v) => ({ ...v, view2D: false, walkthroughMode: false, showNpcs: true }));
+            }}
+            style={{ padding: '8px 12px', borderRadius: 10, fontFamily: 'var(--pc-font-display)', fontSize: 10, fontWeight: 800, letterSpacing: '0.04em' }}
+          >
+            RTLS CANLI
+          </button>
+          <button type="button" className="pc-glass pc-glass--dark pc-tile" onClick={history.undo} disabled={!history.canUndo} title="Geri al" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 18, opacity: history.canUndo ? 1 : 0.4 }}>↶</button>
+          <button type="button" className="pc-glass pc-glass--dark pc-tile" onClick={history.redo} disabled={!history.canRedo} title="İleri al" style={{ width: 34, height: 34, borderRadius: 9, fontSize: 18, opacity: history.canRedo ? 1 : 0.4 }}>↷</button>
+        </div>
+        </div>
         <FloorPill />
         <WallDisplayPill />
+        <ModePanel
+          onSetMode={(mode) => {
+            setGameMode(mode);
+            if (mode === 'live') {
+              setView((v) => ({ ...v, view2D: false, walkthroughMode: false, showNpcs: true }));
+            } else {
+              setView((v) => ({ ...v, walkthroughMode: false, showNpcs: false }));
+            }
+          }}
+          onSurprise={() => undefined}
+        />
       </div>}
+
+      {gameMode === 'live' && (
+        <button
+          type="button"
+          className="pc-glass pc-glass--dark pc-tile"
+          onClick={() => {
+            setGameMode('build');
+            setView((v) => ({ ...v, view2D: false, walkthroughMode: false, showNpcs: false }));
+          }}
+          style={{
+            position: 'absolute',
+            top: 128,
+            right: 16,
+            zIndex: 60,
+            padding: '10px 14px',
+            borderRadius: 10,
+            fontFamily: 'var(--pc-font-display)',
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+          }}
+        >
+          DÜZENLEMEYE DÖN
+        </button>
+      )}
 
       {/* Selection popover lives on the right edge */}
       {gameMode !== 'live' && selectedItem && (
@@ -1057,6 +1286,8 @@ export function RoomOrganizer(): JSX.Element {
           if (camera && controls) zoomCamera(camera, controls, direction);
         }}
         onFit={fitToRoom}
+        onRemoveCatalogItem={removeCatalogItemAndPlacements}
+        onUpdateCatalogItem={updateCatalogItemAndPlacements}
         placeCatalogItem={placeCatalogItem}
       />
 
@@ -1078,6 +1309,8 @@ export function RoomOrganizer(): JSX.Element {
           onShareLink={handleShareLink}
           placeCatalogItem={placeCatalogItem}
           removeItem={removeItem}
+          onRemoveCatalogItem={removeCatalogItemAndPlacements}
+          onUpdateCatalogItem={updateCatalogItemAndPlacements}
         />
       )}
     </div>

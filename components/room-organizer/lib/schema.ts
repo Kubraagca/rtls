@@ -8,6 +8,7 @@ import type {
   SofaShape,
   StairsDirection,
 } from './types';
+import { normaliseCustomItemDimensions } from './custom-item-sizing';
 
 const FIT_MODES: readonly FloorPlanFitMode[] = ['stretch', 'cover', 'contain'];
 const ROOF_STYLES: readonly RoofStyle[] = ['none', 'flat', 'gable', 'hipped'];
@@ -85,6 +86,7 @@ export function isFurnitureItem(value: unknown): value is FurnitureItem {
   if (v.price !== undefined && !isFiniteNumber(v.price)) return false;
   if (v.category !== undefined && typeof v.category !== 'string') return false;
   if (v.position !== undefined && !isVec2(v.position)) return false;
+  if (v.elevation !== undefined && (!isFiniteNumber(v.elevation) || v.elevation < 0)) return false;
   if (v.rotation !== undefined && !isFiniteNumber(v.rotation)) return false;
   // Ranges must be positive: negative signal/vision values invert ring and
   // cone geometry (#121). FOV additionally caps at a full circle.
@@ -204,9 +206,43 @@ export function isRoomLayout(value: unknown): value is RoomLayout {
  * input matches neither.
  */
 export function parseStoredLayout(value: unknown): RoomLayout | null {
-  if (isRoomLayout(value)) return value;
+  if (isRoomLayout(value)) return normaliseStoredCustomItems(value);
+  // Older UI-uploaded GLB entries were saved without the required primitive
+  // colour. Repair those entries before validation so a valid house is not
+  // lost just because a custom model was added with the earlier form.
+  if (isPlainObject(value) && Array.isArray(value.floors)) {
+    const repaired = {
+      ...value,
+      floors: value.floors.map((floor) => {
+        if (!isPlainObject(floor) || !Array.isArray(floor.items)) return floor;
+        return {
+          ...floor,
+          items: floor.items.map((item) => {
+            if (!isPlainObject(item) || typeof item.color === 'string') return item;
+            return { ...item, color: '#cbd5e1' };
+          }),
+        };
+      }),
+    };
+    if (isRoomLayout(repaired)) return repaired;
+  }
   if (isLegacySingleFloorLayout(value)) return migrateLegacyLayout(value);
   return null;
+}
+
+function normaliseStoredCustomItems(layout: RoomLayout): RoomLayout {
+  let changed = false;
+  const floors = layout.floors.map((floor) => ({
+    ...floor,
+    items: floor.items.map((item) => {
+      if (!item.customModelId) return item;
+      const dimensions = normaliseCustomItemDimensions(item);
+      if (dimensions.width === item.width && dimensions.depth === item.depth && dimensions.height === item.height) return item;
+      changed = true;
+      return { ...item, ...dimensions };
+    }),
+  }));
+  return changed ? { ...layout, floors } : layout;
 }
 
 interface LegacySingleFloorLayout {

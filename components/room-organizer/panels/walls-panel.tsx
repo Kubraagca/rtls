@@ -1,7 +1,6 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useRoomEditor } from '../contexts';
@@ -16,10 +15,16 @@ const WALL_LABELS: Record<WallId, string> = {
   west: 'West wall',
 };
 
-const FLOOR_PATTERNS: ReadonlyArray<FloorPattern> = ['solid', 'wood', 'tile', 'carpet', 'concrete'];
-const WALL_PATTERNS: ReadonlyArray<WallPattern> = ['solid', 'brick', 'wallpaper', 'panel', 'plaster', 'siding'];
+const FLOOR_PATTERNS: ReadonlyArray<FloorPattern> = ['solid', 'wood', 'tile', 'concrete'];
+const WALL_PATTERNS: ReadonlyArray<WallPattern> = ['solid', 'brick', 'panel', 'plaster'];
 
-const DEFAULT_WALL_COLOR = '#cccccc';
+const DEFAULT_WALL_COLOR = '#d6d3ce';
+const DEFAULT_FLOOR_COLOR = '#c9a57d';
+const CORPORATE_COLORS = [
+  '#ffffff', '#f7f7f5', '#eeeae3', '#e5ded2',
+  '#d6d3ce', '#b8bcc0', '#8b9298', '#5f6870',
+  '#343a40', '#cbbda9', '#a9957d', '#766653',
+] as const;
 
 export function WallsPanel(): JSX.Element {
   const { activeFloor, actions } = useRoomEditor();
@@ -47,6 +52,24 @@ export function WallsPanel(): JSX.Element {
               ))}
             </SelectContent>
           </Select>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              className="h-7 flex-1 rounded-md border px-2 text-[10px]"
+              disabled={(activeFloor.floorPattern ?? 'solid') === 'solid'}
+              onClick={() => actions.setFloorPattern('solid')}
+            >
+              Parkeyi kaldır
+            </button>
+            <button
+              type="button"
+              className="h-7 flex-1 rounded-md border px-2 text-[10px]"
+              disabled={(activeFloor.floorColor ?? DEFAULT_FLOOR_COLOR).toLowerCase() === DEFAULT_FLOOR_COLOR}
+              onClick={() => actions.setFloorColor(DEFAULT_FLOOR_COLOR)}
+            >
+              Rengi kaldır
+            </button>
+          </div>
         </div>
         <div>
           <Label className="text-xs">Duvar deseni</Label>
@@ -71,12 +94,13 @@ export function WallsPanel(): JSX.Element {
           {(Object.keys(WALL_LABELS) as WallId[]).map((wall) => (
             <div key={wall}>
               <Label className="text-xs">{WALL_LABELS[wall]}</Label>
-              <Input
-                type="color"
+              <select
                 value={activeFloor.wallColors?.[wall] ?? DEFAULT_WALL_COLOR}
                 onChange={(event) => actions.setWallColor(wall, event.target.value)}
-                className="h-8 w-full"
-              />
+                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+              >
+                {CORPORATE_COLORS.map((color) => <option key={color} value={color}>{color}</option>)}
+              </select>
             </div>
           ))}
         </div>

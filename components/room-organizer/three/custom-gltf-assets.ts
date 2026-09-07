@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { loadCustomGlbAssetData } from '../lib/custom-glb-store';
+import { normaliseCustomItemDimensions } from '../lib/custom-item-sizing';
 import type * as ThreeNS from 'three';
 
 export interface CustomGlbSceneInfo {
@@ -32,6 +33,10 @@ function saneDimension(value: number): number {
   return Math.max(0.02, Math.min(50, value));
 }
 
+// Custom uploads are furniture in this editor, so an asset whose longest
+// edge is several metres is almost always exported with an overly large
+// scene scale. Keep the proportions, but give new uploads a usable default
+// size. The user can still enlarge the item later in the editor.
 function normaliseLikelyUnits(width: number, depth: number, height: number): { width: number; depth: number; height: number } {
   const longest = Math.max(width, depth, height);
   let factor = 1;
@@ -41,11 +46,12 @@ function normaliseLikelyUnits(width: number, depth: number, height: number): { w
   if (longest > 1000) factor = 0.001;
   else if (longest > 20) factor = 0.01;
   else if (longest < 0.02) factor = 1 / Math.max(longest, 0.0001);
-  return {
+  const dimensions = {
     width: saneDimension(width * factor),
     depth: saneDimension(depth * factor),
     height: saneDimension(height * factor),
   };
+  return normaliseCustomItemDimensions(dimensions);
 }
 
 export async function inspectCustomGlbScene(
@@ -77,7 +83,9 @@ export async function inspectCustomGlbScene(
 export function loadStoredCustomGltfAsset(id: string): Promise<ThreeNS.Object3D | null> {
   const cached = sourceCache.get(id);
   if (cached) return cached;
-  const promise = loadCustomGlbAssetData(id)
+  const promise = (id.startsWith('/')
+    ? fetch(id).then((response) => response.ok ? response.arrayBuffer() : null)
+    : loadCustomGlbAssetData(id))
     .then((data) => (data ? parseGlb(data) : null))
     .then((gltf) => gltf?.scene ?? null)
     .catch(() => null);

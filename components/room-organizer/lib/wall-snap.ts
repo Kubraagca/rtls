@@ -19,6 +19,8 @@ export interface WallSnapOptions {
   roomDepth: number;
   /** Maximum distance, in metres, considered "near enough" to snap. */
   snapDistance?: number;
+  /** Allow drawing beyond the room footprint (used by the 2D free-draw tool). */
+  clampToRoom?: boolean;
 }
 
 /**
@@ -42,16 +44,19 @@ export function snapWallEndpoint({
   roomWidth,
   roomDepth,
   snapDistance = 0.45,
+  clampToRoom = true,
 }: WallSnapOptions): WallSnapResult {
   const halfW = roomWidth / 2;
   const halfD = roomDepth / 2;
   // Clamp the cursor up front — every snap branch operates against a
   // point already inside the lot, so vertex / right-angle snaps stay
   // accurate even when the user has dragged the cursor onto the grass.
-  const clamped: Vec2 = {
-    x: Math.max(-halfW, Math.min(halfW, point.x)),
-    z: Math.max(-halfD, Math.min(halfD, point.z)),
-  };
+  const clamped: Vec2 = clampToRoom
+    ? {
+        x: Math.max(-halfW, Math.min(halfW, point.x)),
+        z: Math.max(-halfD, Math.min(halfD, point.z)),
+      }
+    : point;
 
   // 1. Vertex snap — existing wall endpoints + building corners.
   const vertices: Vec2[] = [];

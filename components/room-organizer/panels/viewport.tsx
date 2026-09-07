@@ -1,6 +1,5 @@
 'use client';
 
-import { CURRENCY_SYMBOL } from '../lib/constants';
 import { Icon, iconForItem } from '../plotcraft/icon';
 import { Minimap } from './minimap';
 import type { FurnitureItem, RoomLayout } from '../lib/types';
@@ -16,6 +15,7 @@ export interface ViewportProps {
   isReady: boolean;
   error: string | null;
   view2D: boolean;
+  drawWallMode?: boolean;
   layout: RoomLayout;
   activeFloor: FloorLayout;
   selectedItem: FurnitureItem | null;
@@ -34,7 +34,13 @@ export interface ViewportProps {
   } | null;
   canvasRef: React.RefObject<HTMLCanvasElement>;
   canvas2DRef: React.RefObject<HTMLCanvasElement>;
+  backgroundColor: string;
+  backgroundImage: string | null;
   on2DClick?(clientX: number, clientY: number): void;
+  on2DMouseDown?(clientX: number, clientY: number): void;
+  on2DMouseMove?(clientX: number, clientY: number): void;
+  on2DMouseLeave?(): void;
+  on2DWheel?(deltaY: number, clientX: number, clientY: number): void;
   onCatalogDrop?(clientX: number, clientY: number, type: string): void;
 }
 
@@ -51,8 +57,9 @@ export function Viewport(props: ViewportProps): JSX.Element {
     if (!props.onCatalogDrop) return;
     event.preventDefault();
     const type = event.dataTransfer.getData('application/x-room-organizer-catalog-item');
-    if (!type) return;
-    props.onCatalogDrop(event.clientX, event.clientY, type);
+    const itemData = event.dataTransfer.getData('application/x-room-organizer-catalog-item:data');
+    if (!type && !itemData) return;
+    props.onCatalogDrop(event.clientX, event.clientY, itemData || type);
   };
 
   return (
@@ -83,10 +90,45 @@ export function Viewport(props: ViewportProps): JSX.Element {
             width: '100%',
             height: '100%',
             display: props.view2D ? 'block' : 'none',
-            background: 'var(--pc-grass)',
+            backgroundColor: props.backgroundColor,
+            backgroundImage: props.backgroundImage ? `url(${props.backgroundImage})` : undefined,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
           }}
+          onMouseDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            props.on2DMouseDown?.(event.clientX, event.clientY);
+          }}
+          onMouseMove={(event) => props.on2DMouseMove?.(event.clientX, event.clientY)}
+          onMouseLeave={() => props.on2DMouseLeave?.()}
           onClick={(event) => props.on2DClick?.(event.clientX, event.clientY)}
+          onWheel={(event) => {
+            event.preventDefault();
+            props.on2DWheel?.(event.deltaY, event.clientX, event.clientY);
+          }}
         />
+        {props.view2D && props.drawWallMode && (
+          <div
+            aria-label="Duvar çizim alanı"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 8,
+              cursor: 'crosshair',
+              background: 'transparent',
+            }}
+            onClick={(event) => {
+              props.on2DMouseDown?.(event.clientX, event.clientY);
+            }}
+            onMouseMove={(event) => props.on2DMouseMove?.(event.clientX, event.clientY)}
+            onMouseLeave={() => props.on2DMouseLeave?.()}
+            onWheel={(event) => {
+              event.preventDefault();
+              props.on2DWheel?.(event.deltaY, event.clientX, event.clientY);
+            }}
+          />
+        )}
         <canvas
           ref={props.canvasRef}
           className={props.view2D ? 'hidden' : ''}
@@ -95,6 +137,10 @@ export function Viewport(props: ViewportProps): JSX.Element {
             height: '100%',
             display: props.view2D ? 'none' : 'block',
             touchAction: 'none',
+            backgroundColor: props.backgroundColor,
+            backgroundImage: props.backgroundImage ? `url(${props.backgroundImage})` : undefined,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
           }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
@@ -279,21 +325,6 @@ function HoverTooltip({ hover, containerRef }: HoverTooltipProps): JSX.Element |
         <Icon name={iconForItem(hover.item.type, hover.item.category)} size={14} />
         {hover.item.name}
       </p>
-      {hover.item.price !== undefined && (
-        <p
-          style={{
-            margin: '2px 0 0',
-            fontFamily: 'var(--pc-font-display)',
-            fontWeight: 700,
-            fontSize: 12,
-            color: 'var(--pc-money)',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {CURRENCY_SYMBOL}
-          {hover.item.price.toLocaleString()}
-        </p>
-      )}
       <p
         className="pc-blurb"
         style={{
@@ -405,7 +436,7 @@ function ViewportOverlays(props: ViewportProps): JSX.Element {
 
       {props.wallDrawStatus && (
         <div
-          className="absolute top-4 right-4 pc-glass pc-glass--dark"
+          className="pc-wall-draw-status pc-glass pc-glass--dark"
           style={{
             padding: '8px 12px',
             display: 'flex',

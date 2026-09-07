@@ -47,6 +47,8 @@ export interface SidebarDrawerProps {
    * multi-select set, which a local reimplementation here used to miss.
    */
   removeItem(id: string): void;
+  onRemoveCatalogItem(item: CatalogItem): void;
+  onUpdateCatalogItem(item: CatalogItem): void;
 }
 
 export function SidebarDrawer({
@@ -60,6 +62,8 @@ export function SidebarDrawer({
   onShareLink,
   placeCatalogItem,
   removeItem,
+  onRemoveCatalogItem,
+  onUpdateCatalogItem,
 }: SidebarDrawerProps): JSX.Element {
   const { layout, activeFloor, actions, view, isReady, playCue, history, catalogQuery, setCatalogQuery } = useRoomEditor();
   const { selectedItem, selectOnly, allSelectedIds } = useSelection();
@@ -178,6 +182,8 @@ export function SidebarDrawer({
               <FurnitureCatalogPanel
                 query={catalogQuery}
                 onQueryChange={setCatalogQuery}
+                onRemoveCatalogItem={onRemoveCatalogItem}
+                onUpdateCatalogItem={onUpdateCatalogItem}
                 onAdd={(catalogItem) => {
                   const id = placeCatalogItem(catalogItem);
                   selectOnly(id);
