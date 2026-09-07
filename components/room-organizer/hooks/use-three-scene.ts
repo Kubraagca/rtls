@@ -191,7 +191,9 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         failIfMajorPerformanceCaveat: false,
         powerPreference: 'high-performance',
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      // Cap the internal render resolution so high-DPI laptop screens do not
+      // turn every live RTLS frame into a multi-million-pixel redraw.
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
       renderer.setSize(canvas.clientWidth, canvas.clientHeight);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;

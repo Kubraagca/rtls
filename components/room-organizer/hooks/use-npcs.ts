@@ -350,7 +350,10 @@ export function useNpcs(options: UseNpcsOptions): void {
       // Only the selected/closest full avatar may cast a shadow. Even then,
       // refresh the shadow map at ~10 Hz instead of every display frame.
       shadowAccumulator += delta;
-      if (shadowAccumulator >= 0.10) {
+      // Moving-avatar shadow maps are the most expensive live-mode update.
+      // Refresh often enough to avoid a visibly stale shadow, but not every
+      // tenth of a second, which causes frame stalls on integrated GPUs.
+      if (shadowAccumulator >= 0.35) {
         shadowAccumulator = 0;
         requestShadowUpdate?.();
       }

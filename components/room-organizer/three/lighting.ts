@@ -37,7 +37,7 @@ export function addLights(THREE: ThreeModule, scene: ThreeNS.Scene): void {
   directional.shadow.camera.bottom = -shadowExtent;
   directional.shadow.camera.near = 1;
   directional.shadow.camera.far = 60;
-  directional.shadow.mapSize.set(2048, 2048);
+  directional.shadow.mapSize.set(1024, 1024);
   directional.shadow.bias = -0.0005;
   directional.userData.type = LIGHTING_TAGS.Directional;
   scene.add(directional);
