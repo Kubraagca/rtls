@@ -61,6 +61,16 @@ export interface LampPosition {
   x: number;
   z: number;
   height: number;
+  lightOn?: boolean;
+}
+
+export function isLightItemType(type: string): boolean {
+  return type === 'lamp'
+    || type === 'floor-lamp'
+    || type === 'lamppost'
+    || type === 'pendant-light'
+    || type === 'ceiling-panel-light'
+    || type === 'gltf-lamp';
 }
 
 /**
@@ -72,7 +82,8 @@ export function applyTimeOfDay(
   THREE: ThreeModule,
   scene: ThreeNS.Scene,
   hour: number,
-  lampPositions: ReadonlyArray<LampPosition>
+  lampPositions: ReadonlyArray<LampPosition>,
+  lightsEnabled = true
 ): void {
   const time = ((hour % 24) + 24) % 24;
   const profile = computeSkyProfile(time);
@@ -108,11 +119,11 @@ export function applyTimeOfDay(
     .forEach((obj) => removeAndDispose(scene, obj));
 
   const nightFactor = nightIntensity(time);
-  if (nightFactor > 0 && lampPositions.length > 0) {
+  if (lightsEnabled && lampPositions.length > 0) {
     const color = 0xffd180;
-    const baseIntensity = 1.6;
+    const baseIntensity = 1.35 * (0.28 + nightFactor * 0.72);
     const distance = 6;
-    for (const lamp of lampPositions) {
+    for (const lamp of lampPositions.filter((entry) => entry.lightOn !== false)) {
       const point = new THREE.PointLight(color, baseIntensity * nightFactor, distance, 2);
       point.position.set(lamp.x, lamp.height * 0.9, lamp.z);
       point.userData.type = LIGHTING_TAGS.Lamp;

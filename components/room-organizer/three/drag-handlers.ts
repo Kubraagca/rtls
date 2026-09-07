@@ -24,6 +24,7 @@ export interface SceneEventHandlers {
    */
   walkthroughActive?: boolean;
   onItemSelect: (id: string, mode: SelectionMode) => void;
+  onLightToggle?: (id: string) => void;
   onItemDragStart?: (id: string) => void;
   onItemDrag: (id: string, x: number, z: number) => void;
   onItemDragEnd?: (id: string) => void;
@@ -283,7 +284,12 @@ export function attachDragHandlers({
     if (!target) return;
     // A pointerup that never crossed the drag threshold was a select-only
     // click: no session was opened, so there is nothing to end (see #65).
-    if (!started) return;
+    if (!started) {
+      if (target.userData.isLight === true) {
+        handlersRef.current.onLightToggle?.(target.userData.id as string);
+      }
+      return;
+    }
     controls.enabled = true;
     handlersRef.current.onItemDragEnd?.(target.userData.id as string);
   };

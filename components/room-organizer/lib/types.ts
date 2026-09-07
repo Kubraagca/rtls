@@ -116,6 +116,8 @@ export interface FurnitureItem {
   position?: Vec2;
   /** Height above the floor used when an item is placed on a tabletop. */
   elevation?: number;
+  /** Whether a light-emitting item is currently switched on. Defaults to true. */
+  lightOn?: boolean;
   rotation?: number;
   isWiFiAccessPoint?: boolean;
   isCCTV?: boolean;
@@ -233,6 +235,8 @@ export interface ViewSettings {
   floorPlan3DEffect: boolean;
   /** Hour of the day in [0, 24); drives the continuous sun-arc lighting. */
   timeOfDay: number;
+  /** Master switch for placed lamps and ceiling lights. */
+  lightsEnabled: boolean;
   walkthroughMode: boolean;
   showOutdoor: boolean;
   snapToItems: boolean;

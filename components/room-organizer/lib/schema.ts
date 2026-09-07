@@ -113,6 +113,7 @@ export function isFurnitureItem(value: unknown): value is FurnitureItem {
   // keyboard-delete guards yet fails `=== true` drag checks, desyncing the two.
   if (!isOptionalBoolean(v.locked)) return false;
   if (!isOptionalBoolean(v.mirrored)) return false;
+  if (!isOptionalBoolean(v.lightOn)) return false;
   if (!isOptionalBoolean(v.cameraBracket)) return false;
   if (!isOptionalBoolean(v.isCCTV)) return false;
   if (!isOptionalBoolean(v.isWiFiAccessPoint)) return false;

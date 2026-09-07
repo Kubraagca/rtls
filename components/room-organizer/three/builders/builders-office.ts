@@ -362,12 +362,13 @@ export function buildPartition({ THREE, item, hasCollision, opacity }: BuilderCo
 
 export function buildCeilingPanelLight({ THREE, item, hasCollision, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
+  const lightOn = item.lightOn !== false;
   const rim = standardMat(THREE, 0xdde2e5, hasCollision, opacity, { roughness: 0.3, metalness: 0.42 });
   const diffuser = standardMat(THREE, 0xfff7df, hasCollision, opacity, {
     roughness: 0.2,
     metalness: 0,
     emissive: 0xffe8b7,
-    emissiveIntensity: 1.9,
+    emissiveIntensity: lightOn ? 1.9 : 0.04,
   });
   const y = Math.max(2.55, Math.min(2.92, item.height));
   const frame = mesh(THREE, new THREE.BoxGeometry(item.width, 0.055, item.depth), rim);
@@ -378,7 +379,7 @@ export function buildCeilingPanelLight({ THREE, item, hasCollision, opacity }: B
   group.add(lightPanel);
 
   if (!hasCollision) {
-    const light = new THREE.PointLight(0xfff2d6, 0.7, 5.5, 2);
+    const light = new THREE.PointLight(0xfff2d6, lightOn ? 0.7 : 0, 5.5, 2);
     light.position.set(0, y - 0.25, 0);
     light.castShadow = false;
     group.add(light);

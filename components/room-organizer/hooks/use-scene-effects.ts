@@ -19,7 +19,7 @@ import {
 } from '../three/interior-walls';
 import { clearRoomFloorZones, renderRoomFloorZones } from '../three/room-floor-zones';
 import { clearItemLabels, renderItemLabels } from '../three/item-labels';
-import { applyTimeOfDay } from '../three/lighting';
+import { applyTimeOfDay, isLightItemType } from '../three/lighting';
 import { clearMeasurement, renderMeasurement } from '../three/measurement';
 import { cloneAndFitOfficeAvatar, loadOfficeIdleAvatar } from '../three/office-avatar';
 import { setOutdoorVisible } from '../three/outdoor';
@@ -249,8 +249,8 @@ export function useSceneEffects({
       JSON.stringify(
         layout.floors.map((floor) =>
           floor.items
-            .filter((item) => (item.type === 'lamp' || item.type === 'floor-lamp') && item.position)
-            .map((item) => [item.position!.x, item.position!.z, item.height])
+            .filter((item) => isLightItemType(item.type) && item.position)
+            .map((item) => [item.position!.x, item.position!.z, item.height, item.elevation ?? 0, item.lightOn !== false])
         )
       ),
     [layout.floors]
@@ -422,12 +422,16 @@ export function useSceneEffects({
 
         // Overlapping items keep their own materials; collision detection is
         // still calculated for editor logic but is no longer shown in red.
-        const group = createFurnitureModel(THREE, item, false);
+        const modelItem = !view.lightsEnabled && isLightItemType(item.type)
+          ? { ...item, lightOn: false }
+          : item;
+        const group = createFurnitureModel(THREE, modelItem, false);
         group.position.set(item.position.x, floorY + (item.elevation ?? 0), item.position.z);
         group.rotation.y = item.rotation ?? 0;
         if (item.mirrored) group.scale.x = -1;
         group.userData.type = ROOM_OBJECT_TAGS.Furniture;
         group.userData.ceilingLight = item.type === 'ceiling-panel-light';
+        group.userData.isLight = isLightItemType(item.type);
         group.userData.floorY = floorY;
         group.userData.id = item.id;
         group.userData.floorIndex = index;
@@ -455,7 +459,7 @@ export function useSceneEffects({
               group.remove(child);
               disposeObject(child);
             }
-            group.add(fitStoredCustomGltfAsset(THREE, source, item));
+            group.add(fitStoredCustomGltfAsset(THREE, source, modelItem));
             invalidate();
             requestShadowUpdate();
           });
@@ -497,7 +501,7 @@ export function useSceneEffects({
                 group.remove(child);
                 disposeObject(child);
               }
-              group.add(fitGltfAsset(THREE, source, item));
+              group.add(fitGltfAsset(THREE, source, modelItem));
               invalidate();
               requestShadowUpdate();
             });
@@ -525,7 +529,7 @@ export function useSceneEffects({
   }, [
     isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef,
     layout.floors, layout.width, layout.height,
-    activeFloor, activeFloorIndex, view.showAllFloors, digitalTwinLiveMode, catalog,
+    activeFloor, activeFloorIndex, view.showAllFloors, view.lightsEnabled, digitalTwinLiveMode, catalog,
   ]);
 
   // Selection / highlight outlines. Kept out of the furniture effect above so
@@ -629,22 +633,23 @@ export function useSceneEffects({
 
     const lampPositions = layout.floors.flatMap((floor, index) =>
       floor.items
-        .filter((item) => (item.type === 'lamp' || item.type === 'floor-lamp') && item.position)
+        .filter((item) => isLightItemType(item.type) && item.position)
         .map((item) => ({
           x: item.position!.x,
           z: item.position!.z,
-          height: item.height + index * FLOOR_HEIGHT_METERS,
+          height: (item.elevation ?? 0) + item.height + index * FLOOR_HEIGHT_METERS,
+          lightOn: item.lightOn !== false,
         }))
     );
 
-    applyTimeOfDay(THREE, scene, view.timeOfDay, lampPositions);
+    applyTimeOfDay(THREE, scene, view.timeOfDay, lampPositions, view.lightsEnabled);
     // The sun's angle/position changed, so the (static) shadow map must be
     // recomputed or shadows would stay frozen at the previous time of day.
     requestShadowUpdate();
     // layout.floors is read for lamp positions only; lampsKey covers exactly
     // that, so a non-lamp item edit doesn't rebuild the sky and lights.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, view.timeOfDay, lampsKey]);
+  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, view.timeOfDay, view.lightsEnabled, lampsKey]);
 
   // Apply the user-selected background after the time-of-day sky effect. The
   // custom image is kept as a scene texture so the opaque WebGL canvas can

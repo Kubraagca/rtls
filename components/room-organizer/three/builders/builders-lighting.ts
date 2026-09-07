@@ -3,6 +3,7 @@ import type * as ThreeNS from 'three';
 
 export function buildLamp({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
+  const lightOn = item.lightOn !== false;
 
   const base = mesh(
     THREE,
@@ -29,7 +30,7 @@ export function buildLamp({ THREE, item, hasCollision, baseColor, opacity }: Bui
       transparent: true,
       opacity: hasCollision ? 0.7 : 0.8,
       emissive: 0xffff88,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: lightOn ? 0.3 : 0.02,
     })
   );
   shade.position.y = item.height * 0.9;
@@ -40,9 +41,10 @@ export function buildLamp({ THREE, item, hasCollision, baseColor, opacity }: Bui
 
 export function buildPendantLight({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
+  const lightOn = item.lightOn !== false;
   const cordMat = material(THREE, 0x222222, hasCollision, opacity, { roughness: 0.8 });
   const shadeMat = material(THREE, baseColor, hasCollision, opacity, { roughness: 0.6, metalness: 0.3, emissive: baseColor, emissiveIntensity: 0.25 });
-  const bulbMat = material(THREE, 0xfff8c0, hasCollision, opacity, { roughness: 0.1, emissive: 0xfff066, emissiveIntensity: 0.6 });
+  const bulbMat = material(THREE, 0xfff8c0, hasCollision, opacity, { roughness: 0.1, emissive: 0xfff066, emissiveIntensity: lightOn ? 0.6 : 0.02 });
 
   // Ceiling rosette / canopy.
   const canopy = mesh(
@@ -82,8 +84,9 @@ export function buildPendantLight({ THREE, item, hasCollision, baseColor, opacit
 
 export function buildLamppost({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
+  const lightOn = item.lightOn !== false;
   const metalMat = material(THREE, baseColor, hasCollision, opacity, { roughness: 0.4, metalness: 0.6 });
-  const glassMat = material(THREE, 0xfff59d, hasCollision, opacity, { roughness: 0.1, metalness: 0.0, emissive: 0xfff176, emissiveIntensity: 0.4 });
+  const glassMat = material(THREE, 0xfff59d, hasCollision, opacity, { roughness: 0.1, metalness: 0.0, emissive: 0xfff176, emissiveIntensity: lightOn ? 0.4 : 0.02 });
 
   const base = mesh(THREE, new THREE.CylinderGeometry(item.width * 0.4, item.width * 0.5, item.height * 0.05, 12), metalMat);
   base.position.y = item.height * 0.025;

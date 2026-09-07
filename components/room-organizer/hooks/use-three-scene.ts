@@ -40,6 +40,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
     canvasRef,
     walkthroughActive,
     onItemSelect,
+    onLightToggle,
     onItemDragStart,
     onItemDrag,
     onItemDragEnd,
@@ -84,6 +85,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   const handlersRef = useRef<SceneEventHandlers>({
     walkthroughActive,
     onItemSelect,
+    onLightToggle,
     onItemDragStart,
     onItemDrag,
     onItemDragEnd,
@@ -98,6 +100,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   handlersRef.current = {
     walkthroughActive,
     onItemSelect,
+    onLightToggle,
     onItemDragStart,
     onItemDrag,
     onItemDragEnd,
