@@ -681,7 +681,9 @@ export function RoomOrganizer(): JSX.Element {
   invalidateBoxRef.current = invalidate;
 
   liveLightToggleRef.current = useCallback((id: string) => {
-    const group = sceneRef.current?.children.find(
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const group = scene.children.find(
       (child) => child.userData.type === 'furniture' && child.userData.id === id
     );
     if (!group) return;
@@ -706,6 +708,17 @@ export function RoomOrganizer(): JSX.Element {
         : material.emissiveIntensity;
       material.userData.baseEmissiveIntensity = baseEmissive;
       material.emissiveIntensity = nextOn ? baseEmissive : 0.02;
+    });
+    // Floor/pendant/GLTF lamps use a shared scene-level point light rather
+    // than adding another light inside every furniture group.
+    scene.children.forEach((node) => {
+      if (node.userData.type !== 'light:lamp' || node.userData.itemId !== id) return;
+      const light = node as unknown as { intensity: number; userData: Record<string, unknown> };
+      const baseIntensity = typeof light.userData.baseIntensity === 'number'
+        ? light.userData.baseIntensity
+        : light.intensity || 1;
+      light.userData.baseIntensity = baseIntensity;
+      light.intensity = nextOn ? 0 : baseIntensity;
     });
     invalidate();
   }, [invalidate, sceneRef]);

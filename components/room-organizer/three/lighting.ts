@@ -58,6 +58,7 @@ export const TIME_PRESETS = {
 export type TimePresetKey = keyof typeof TIME_PRESETS;
 
 export interface LampPosition {
+  id?: string;
   x: number;
   z: number;
   height: number;
@@ -124,9 +125,10 @@ export function applyTimeOfDay(
     const baseIntensity = 1.35 * (0.28 + nightFactor * 0.72);
     const distance = 6;
     for (const lamp of lampPositions.filter((entry) => entry.lightOn !== false)) {
-      const point = new THREE.PointLight(color, baseIntensity * nightFactor, distance, 2);
+      const point = new THREE.PointLight(color, baseIntensity, distance, 2);
       point.position.set(lamp.x, lamp.height * 0.9, lamp.z);
       point.userData.type = LIGHTING_TAGS.Lamp;
+      point.userData.itemId = lamp.id;
       scene.add(point);
     }
   }

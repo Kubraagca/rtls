@@ -428,18 +428,6 @@ export function useSceneEffects({
         // Some imported lamp models are visual-only GLBs and do not contain a
         // Three.js light. Add a local, real point light so clicking the model
         // changes the surrounding illumination immediately in live mode too.
-        if (isLightItemType(item.type) && item.type !== 'ceiling-panel-light') {
-          const localLight = new THREE.PointLight(
-            0xffd38a,
-            modelItem.lightOn === false ? 0 : 2.2,
-            6,
-            2
-          );
-          localLight.position.set(0, Math.max(0.8, item.height * 0.72), 0);
-          localLight.castShadow = false;
-          localLight.userData.type = 'light:interactive-item';
-          group.add(localLight);
-        }
         group.position.set(item.position.x, floorY + (item.elevation ?? 0), item.position.z);
         group.rotation.y = item.rotation ?? 0;
         if (item.mirrored) group.scale.x = -1;
@@ -648,8 +636,9 @@ export function useSceneEffects({
 
     const lampPositions = layout.floors.flatMap((floor, index) =>
       floor.items
-        .filter((item) => isLightItemType(item.type) && item.position)
+        .filter((item) => isLightItemType(item.type) && item.type !== 'ceiling-panel-light' && item.position)
         .map((item) => ({
+          id: item.id,
           x: item.position!.x,
           z: item.position!.z,
           height: (item.elevation ?? 0) + item.height + index * FLOOR_HEIGHT_METERS,
