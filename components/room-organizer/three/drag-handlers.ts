@@ -25,6 +25,7 @@ export interface SceneEventHandlers {
   walkthroughActive?: boolean;
   onItemSelect: (id: string, mode: SelectionMode) => void;
   onLightToggle?: (id: string) => void;
+  onCurtainToggle?: (id: string) => void;
   onItemDragStart?: (id: string) => void;
   onItemDrag: (id: string, x: number, z: number) => void;
   onItemDragEnd?: (id: string) => void;
@@ -287,6 +288,9 @@ export function attachDragHandlers({
     if (!started) {
       if (target.userData.isLight === true) {
         handlersRef.current.onLightToggle?.(target.userData.id as string);
+      }
+      if (target.userData.isCurtain === true) {
+        handlersRef.current.onCurtainToggle?.(target.userData.id as string);
       }
       return;
     }

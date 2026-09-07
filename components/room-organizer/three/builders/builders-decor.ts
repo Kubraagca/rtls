@@ -85,6 +85,7 @@ export function buildMirror({ THREE, item, hasCollision, baseColor, opacity }: B
 
 export function buildCurtains({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
+  const curtainsOpen = item.curtainsOpen === true;
   const rodMat = material(THREE, 0x37474f, hasCollision, opacity, { roughness: 0.4, metalness: 0.7 });
   const fabricMat = material(THREE, baseColor, hasCollision, opacity, { roughness: 0.95 });
 
@@ -128,7 +129,9 @@ export function buildCurtains({ THREE, item, hasCollision, baseColor, opacity }:
     );
     hem.position.y = -panelHeight * 0.96;
     panel.add(hem);
-    panel.position.set(sign * (item.width / 2 - panelWidth / 2), item.height - 0.06, 0);
+    const openOffset = item.width / 2 - panelWidth / 2;
+    const closedOffset = panelWidth * 0.42;
+    panel.position.set(sign * (curtainsOpen ? openOffset : closedOffset), item.height - 0.06, 0);
     group.add(panel);
   }
 

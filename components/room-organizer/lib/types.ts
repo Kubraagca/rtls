@@ -118,6 +118,8 @@ export interface FurnitureItem {
   elevation?: number;
   /** Whether a light-emitting item is currently switched on. Defaults to true. */
   lightOn?: boolean;
+  /** Whether a curtain is pulled open. Defaults to closed. */
+  curtainsOpen?: boolean;
   rotation?: number;
   isWiFiAccessPoint?: boolean;
   isCCTV?: boolean;

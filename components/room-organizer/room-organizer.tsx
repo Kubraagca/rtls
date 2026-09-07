@@ -132,6 +132,7 @@ export function RoomOrganizer(): JSX.Element {
   const { recent: recentColors, pushColor } = useRecentColors();
   const [view, setView] = useState<ViewSettings>(INITIAL_VIEW_SETTINGS);
   const [planCamera, setPlanCamera] = useState({ zoom: 1, panX: 0, panY: 0 });
+  const curtainFocusRef = useRef<string | null>(null);
 
   // First-person walkthrough only runs in the 3D view; the 2D top-down renderer
   // has no PointerLockControls. This single signal gates walkthrough-aware
@@ -424,6 +425,13 @@ export function RoomOrganizer(): JSX.Element {
     actions.updateItem(id, { lightOn: item.lightOn === false });
   }, [actions, activeFloor.items]);
 
+  const toggleCurtain = useCallback((id: string) => {
+    const item = activeFloor.items.find((entry) => entry.id === id);
+    if (!item || item.type !== 'curtains') return;
+    curtainFocusRef.current = id;
+    actions.updateItem(id, { curtainsOpen: item.curtainsOpen !== true });
+  }, [actions, activeFloor.items]);
+
   const allSelectedIds = useMemo(() => {
     const set = new Set(extraSelectedIds);
     if (selectedItemId) set.add(selectedItemId);
@@ -643,6 +651,7 @@ export function RoomOrganizer(): JSX.Element {
       walkthroughActive,
       onItemSelect: handleSelect,
       onLightToggle: toggleLight,
+      onCurtainToggle: toggleCurtain,
       onItemDragStart: handleDragStart,
       onItemDrag: handleDrag,
       onItemDragEnd: handleDragEnd,
@@ -751,6 +760,16 @@ export function RoomOrganizer(): JSX.Element {
     roomSize: Math.max(layout.width, layout.height),
     buildingHeight: layout.floors.length * FLOOR_HEIGHT_METERS,
   });
+
+  useEffect(() => {
+    const id = curtainFocusRef.current;
+    if (!id) return;
+    const item = activeFloor.items.find((entry) => entry.id === id);
+    if (item?.position) {
+      focusOn(item.position, 2.8, activeFloorY + (item.elevation ?? 0));
+    }
+    curtainFocusRef.current = null;
+  }, [activeFloor.items, activeFloorY, focusOn]);
 
 
   const focusTrackedDevice = useCallback(

@@ -432,6 +432,7 @@ export function useSceneEffects({
         group.userData.type = ROOM_OBJECT_TAGS.Furniture;
         group.userData.ceilingLight = item.type === 'ceiling-panel-light';
         group.userData.isLight = isLightItemType(item.type);
+        group.userData.isCurtain = item.type === 'curtains';
         group.userData.floorY = floorY;
         group.userData.id = item.id;
         group.userData.floorIndex = index;
