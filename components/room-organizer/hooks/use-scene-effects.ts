@@ -117,21 +117,15 @@ function ghostifyGroup(group: import('three').Object3D, opacity = 0.12): void {
 }
 
 function updateCeilingLightVisibility(
-  THREE: typeof import('three'),
+  _THREE: typeof import('three'),
   scene: import('three').Scene,
-  camera: import('three').PerspectiveCamera,
+  _camera: import('three').PerspectiveCamera,
 ): void {
-  const direction = camera.getWorldDirection(new THREE.Vector3());
-  const lookingAtCeiling = direction.y > 0.04;
   scene.traverse((node) => {
     if (node.userData.ceilingLight !== true) return;
-    const floorY = Number(node.userData.floorY ?? 0);
-    const panelPosition = node.getWorldPosition(new THREE.Vector3());
-    const closeToPanel = camera.position.distanceTo(panelPosition) <= 8;
-    const belowCeiling = camera.position.y < floorY + 3.05;
-    // Keep the clean overview free of floating panels, but reveal them while
-    // the user is inside the storey or explicitly looking up at the ceiling.
-    node.visible = belowCeiling && (closeToPanel || lookingAtCeiling);
+    // Ceiling panels remain visible in every camera angle and distance so
+    // users can always find and click the individual light directly.
+    node.visible = true;
   });
 }
 
