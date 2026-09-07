@@ -133,6 +133,7 @@ export function RoomOrganizer(): JSX.Element {
   const [view, setView] = useState<ViewSettings>(INITIAL_VIEW_SETTINGS);
   const [planCamera, setPlanCamera] = useState({ zoom: 1, panX: 0, panY: 0 });
   const curtainFocusRef = useRef<string | null>(null);
+  const liveLightToggleRef = useRef<(id: string) => void>(() => {});
 
   // First-person walkthrough only runs in the 3D view; the 2D top-down renderer
   // has no PointerLockControls. This single signal gates walkthrough-aware
@@ -422,8 +423,14 @@ export function RoomOrganizer(): JSX.Element {
   const toggleLight = useCallback((id: string) => {
     const item = activeFloor.items.find((entry) => entry.id === id);
     if (!item) return;
+    if (gameMode === 'live') {
+      // Live mode must not write a layout snapshot for every device click;
+      // that would restart the RTLS stream. The scene applies this instantly.
+      liveLightToggleRef.current(id);
+      return;
+    }
     actions.updateItem(id, { lightOn: item.lightOn === false });
-  }, [actions, activeFloor.items]);
+  }, [actions, activeFloor.items, gameMode]);
 
   const toggleCurtain = useCallback((id: string) => {
     const item = activeFloor.items.find((entry) => entry.id === id);
@@ -672,6 +679,36 @@ export function RoomOrganizer(): JSX.Element {
 
   sceneBoxRef.current = sceneRef;
   invalidateBoxRef.current = invalidate;
+
+  liveLightToggleRef.current = useCallback((id: string) => {
+    const group = sceneRef.current?.children.find(
+      (child) => child.userData.type === 'furniture' && child.userData.id === id
+    );
+    if (!group) return;
+    const nextOn = group.userData.liveLightOn !== false;
+    group.userData.liveLightOn = !nextOn;
+    group.traverse((node) => {
+      if ((node as { isLight?: boolean }).isLight) {
+        const light = node as unknown as { intensity: number; userData: Record<string, unknown> };
+        const baseIntensity = typeof light.userData.baseIntensity === 'number'
+          ? light.userData.baseIntensity
+          : light.intensity || 1;
+        light.userData.baseIntensity = baseIntensity;
+        light.intensity = nextOn ? 0 : baseIntensity;
+      }
+      const material = (node as unknown as {
+        material?: { emissiveIntensity?: number; userData?: Record<string, unknown> };
+      }).material;
+      if (!material || material.emissiveIntensity === undefined) return;
+      material.userData ??= {};
+      const baseEmissive = typeof material.userData.baseEmissiveIntensity === 'number'
+        ? material.userData.baseEmissiveIntensity
+        : material.emissiveIntensity;
+      material.userData.baseEmissiveIntensity = baseEmissive;
+      material.emissiveIntensity = nextOn ? baseEmissive : 0.02;
+    });
+    invalidate();
+  }, [invalidate, sceneRef]);
 
   useWalkthrough({
     enabled: isReady && walkthroughActive,
