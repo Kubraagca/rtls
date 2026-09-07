@@ -482,14 +482,25 @@ export function useSceneEffects({
 
             const clip = avatar.animations.find((animation) => animation.name === 'mixamo.com')
               ?? avatar.animations[0];
-            if (clip) {
+            if (digitalTwinLiveMode && clip) {
               const mixer = new THREE.AnimationMixer(avatar.model);
               const action = mixer.clipAction(clip);
               action.setLoop(THREE.LoopRepeat, Infinity);
               action.reset().play();
               avatarMixers.add(mixer);
               startAvatarAnimationLoop();
-            } else {
+            } else if (clip) {
+              // The idle GLB is bind/T-pose until its first animation sample
+              // is evaluated. Apply one stable idle sample in editor mode,
+              // but do not keep a RAF/mixer loop running just to hold it.
+              const mixer = new THREE.AnimationMixer(avatar.model);
+              const action = mixer.clipAction(clip);
+              action.setLoop(THREE.LoopOnce, 1);
+              action.clampWhenFinished = true;
+              action.reset().play();
+              mixer.setTime(Math.min(clip.duration * 0.2, 0.25));
+              action.paused = true;
+            } else if (digitalTwinLiveMode) {
               console.warn('Edit avatar idle animation clip bulunamadı');
             }
             invalidate();

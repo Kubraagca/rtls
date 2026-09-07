@@ -300,7 +300,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       const onResize = () => {
         camera.aspect = canvas.clientWidth / canvas.clientHeight;
         camera.updateProjectionMatrix();
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
         renderer.setSize(canvas.clientWidth, canvas.clientHeight);
         dirtyRef.current = true;
       };

@@ -194,6 +194,21 @@ export function cloneAndFitOfficeAvatar(
   const center = fittedBounds.getCenter(new THREE.Vector3());
   model.position.set(-center.x, -fittedBounds.min.y, -center.z);
 
+  // Rigged GLBs are commonly loaded in their bind pose (T-pose) until an
+  // animation action samples the skeleton. Apply one stable idle sample to
+  // every clone so no render path can briefly expose the bind pose. Live mode
+  // may attach its own looping mixer afterwards.
+  const poseClip = asset.animations[0];
+  if (poseClip) {
+    const poseMixer = new THREE.AnimationMixer(model);
+    const poseAction = poseMixer.clipAction(poseClip);
+    poseAction.setLoop(THREE.LoopOnce, 1);
+    poseAction.clampWhenFinished = true;
+    poseAction.reset().play();
+    poseMixer.setTime(Math.min(poseClip.duration * 0.2, 0.25));
+    poseAction.paused = true;
+  }
+
   if (addBadge) {
     const badgeMat = new THREE.MeshStandardMaterial({
       color: 0x23bfd2,

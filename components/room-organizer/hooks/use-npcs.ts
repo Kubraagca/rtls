@@ -263,7 +263,6 @@ export function useNpcs(options: UseNpcsOptions): void {
     let snapshotAccumulator = SNAPSHOT_REFRESH_SECONDS;
     let lodAccumulator = LOD_REFRESH_SECONDS;
     let proxyAccumulator = PROXY_REFRESH_SECONDS;
-    let shadowAccumulator = 0;
     let performanceAccumulator = 0;
     let frameCounter = 0;
     let lastProxyCount = 0;
@@ -324,7 +323,7 @@ export function useNpcs(options: UseNpcsOptions): void {
 
       // Full-quality containers still move smoothly every RAF, while expensive
       // skeleton evaluation is capped to 30 Hz below.
-      updateFullAvatarSlots(THREE, npcs, fullSlots, delta, floorY, showLabelsRef.current, priorityDeviceIdRef.current);
+      updateFullAvatarSlots(THREE, npcs, fullSlots, delta, floorY, showLabelsRef.current);
 
       if (proxyAccumulator >= PROXY_REFRESH_SECONDS) {
         proxyAccumulator = 0;
@@ -347,16 +346,6 @@ export function useNpcs(options: UseNpcsOptions): void {
 
       if (!changed || !render3DRef.current) return;
 
-      // Only the selected/closest full avatar may cast a shadow. Even then,
-      // refresh the shadow map at ~10 Hz instead of every display frame.
-      shadowAccumulator += delta;
-      // Moving-avatar shadow maps are the most expensive live-mode update.
-      // Refresh often enough to avoid a visibly stale shadow, but not every
-      // tenth of a second, which causes frame stalls on integrated GPUs.
-      if (shadowAccumulator >= 0.35) {
-        shadowAccumulator = 0;
-        requestShadowUpdate?.();
-      }
       invalidate?.();
     };
 
@@ -735,12 +724,7 @@ function releaseSlot(slot: FullAvatarSlot): void {
   slot.sittingMixer?.stopAllAction();
   slot.activeMode = undefined;
   slot.animationAccumulator = 0;
-  if (slot.shadowEnabled) {
-    setAvatarShadow(slot.walkingModel, false);
-    if (slot.idleModel) setAvatarShadow(slot.idleModel, false);
-    if (slot.sittingModel) setAvatarShadow(slot.sittingModel, false);
-    slot.shadowEnabled = false;
-  }
+  slot.shadowEnabled = false;
 }
 
 function updateFullAvatarSlots(
@@ -749,26 +733,8 @@ function updateFullAvatarSlots(
   slots: FullAvatarSlot[],
   delta: number,
   floorY: number,
-  showLabels: boolean,
-  priorityDeviceId: string | null
+  showLabels: boolean
 ): void {
-  const selectedIndex = priorityDeviceId
-    ? npcs.findIndex((npc) => String(npc.group.userData.rtlsId) === priorityDeviceId)
-    : -1;
-
-  let nearestAssigned: FullAvatarSlot | undefined;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const slot of slots) {
-    const index = slot.assignedNpcIndex;
-    if (index === undefined) continue;
-    const npc = npcs[index];
-    if (!npc) continue;
-    if (npc.cameraDistance < nearestDistance) {
-      nearestDistance = npc.cameraDistance;
-      nearestAssigned = slot;
-    }
-  }
-
   for (const slot of slots) {
     const index = slot.assignedNpcIndex;
     if (index === undefined) continue;
@@ -802,15 +768,9 @@ function updateFullAvatarSlots(
     }
     slot.labelSprite.visible = showLabels;
 
-    // One shadow-casting avatar is enough to ground the crowd visually. The
-    // selected person wins; otherwise the nearest full avatar gets the shadow.
-    const shouldShadow = selectedIndex >= 0 ? npc.index === selectedIndex : slot === nearestAssigned;
-    if (slot.shadowEnabled !== shouldShadow) {
-      setAvatarShadow(slot.walkingModel, shouldShadow);
-      if (slot.idleModel) setAvatarShadow(slot.idleModel, shouldShadow);
-      if (slot.sittingModel) setAvatarShadow(slot.sittingModel, shouldShadow);
-      slot.shadowEnabled = shouldShadow;
-    }
+    // Moving personnel never cast or receive shadows. This keeps the RTLS
+    // animation path independent from the renderer's shadow-map pass.
+    slot.shadowEnabled = false;
   }
 
   void THREE; // kept in the signature for future GPU timing hooks without changing the public hook.
@@ -933,15 +893,6 @@ function redrawStatusLabel(
 function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, r);
-}
-
-function setAvatarShadow(model: ThreeNS.Object3D, enabled: boolean): void {
-  model.traverse((node) => {
-    const mesh = node as ThreeNS.Mesh;
-    if (!mesh.isMesh) return;
-    mesh.castShadow = enabled;
-    mesh.receiveShadow = false;
-  });
 }
 
 function disposeFullAvatarSlot(scene: ThreeNS.Scene, slot: FullAvatarSlot): void {
