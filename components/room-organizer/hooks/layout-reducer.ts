@@ -24,6 +24,7 @@ export type LayoutAction =
   | { type: 'setName'; name: string }
   | { type: 'setWidth'; width: number }
   | { type: 'setHeight'; height: number }
+  | { type: 'resizeRoom'; width: number; height: number; shiftX: number; shiftZ: number }
   // floor-scoped finishes — target the active floor
   | { type: 'setFloorColor'; color: string }
   | { type: 'setFloorPattern'; pattern: FloorPattern }
@@ -49,6 +50,8 @@ export type LayoutAction =
   | { type: 'bulkSetPositions'; positions: ReadonlyMap<string, { x: number; z: number }> }
   | { type: 'addInteriorWall'; wall: InteriorWall }
   | { type: 'addInteriorWalls'; walls: readonly InteriorWall[] }
+  | { type: 'updateInteriorWall'; id: string; patch: Partial<InteriorWall> }
+  | { type: 'updateBoundaryWall'; id: string; patch: Partial<InteriorWall> }
   | { type: 'removeInteriorWall'; id: string }
   | { type: 'toggleExteriorWall'; wallId: WallId }
   | { type: 'clearInteriorWalls' }
@@ -203,6 +206,27 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
       return withLayout(state, (layout) => ({ ...layout, width: clampRoomDimension(action.width) }));
     case 'setHeight':
       return withLayout(state, (layout) => ({ ...layout, height: clampRoomDimension(action.height) }));
+
+    case 'resizeRoom':
+      return withLayout(state, (layout) => normaliseBoundarySize({
+        ...layout,
+        width: clampRoomDimension(action.width),
+        height: clampRoomDimension(action.height),
+        floors: layout.floors.map((floor, index) => index === state.activeFloorIndex ? {
+          ...floor,
+          items: floor.items.map((item) => item.position ? {
+            ...item,
+            position: { x: item.position.x + action.shiftX, z: item.position.z + action.shiftZ },
+          } : item),
+          interiorWalls: (floor.interiorWalls ?? []).map((wall) => ({
+            ...wall,
+            x1: wall.x1 + action.shiftX,
+            x2: wall.x2 + action.shiftX,
+            z1: wall.z1 + action.shiftZ,
+            z2: wall.z2 + action.shiftZ,
+          })),
+        } : floor),
+      }));
 
     // -- floor-scoped finishes ----------------------------------------------
     case 'setFloorColor':
@@ -439,6 +463,45 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
       }));
     }
 
+    case 'updateInteriorWall':
+      return withActiveFloor(state, (floor) => ({
+        ...floor,
+        interiorWalls: (floor.interiorWalls ?? []).map((wall) =>
+          wall.id === action.id ? { ...wall, ...action.patch } : wall
+        ),
+      }));
+
+    case 'updateBoundaryWall':
+      return withLayout(state, (layout) => {
+        const walls = layout.boundaryWalls ?? [
+          { id: 'outer-north', x1: -layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: -layout.height / 2 },
+          { id: 'outer-east', x1: layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: layout.height / 2 },
+          { id: 'outer-south', x1: layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: layout.height / 2 },
+          { id: 'outer-west', x1: -layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: -layout.height / 2 },
+        ];
+        const target = walls.find((wall) => wall.id === action.id);
+        if (!target) return layout;
+        const nextTarget = { ...target, ...action.patch };
+        const samePoint = (ax: number, az: number, bx: number, bz: number) =>
+          Math.abs(ax - bx) < 0.001 && Math.abs(az - bz) < 0.001;
+        const updatePoint = (wall: InteriorWall, x: number, z: number, nx: number, nz: number): InteriorWall => ({
+          ...wall,
+          ...(samePoint(wall.x1, wall.z1, x, z) ? { x1: nx, z1: nz } : {}),
+          ...(samePoint(wall.x2, wall.z2, x, z) ? { x2: nx, z2: nz } : {}),
+        });
+        const movedPoints = [
+          { x: target.x1, z: target.z1, nx: nextTarget.x1, nz: nextTarget.z1 },
+          { x: target.x2, z: target.z2, nx: nextTarget.x2, nz: nextTarget.z2 },
+        ];
+        return normaliseBoundarySize({
+          ...layout,
+          boundaryWalls: walls.map((wall) => {
+            if (wall.id === action.id) return nextTarget;
+            return movedPoints.reduce((current, point) => updatePoint(current, point.x, point.z, point.nx, point.nz), wall);
+          }),
+        });
+      });
+
     case 'removeInteriorWall':
       return withActiveFloor(state, (floor) => ({
         ...floor,
@@ -546,7 +609,7 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
     }
 
     case 'applyLayout': {
-      const layout = normaliseLayout(action.layout);
+      const layout = normaliseBoundarySize(normaliseLayout(action.layout));
       // Clamp instead of resetting to 0 so undo/redo of an edit made on an
       // upper floor doesn't jump the view back to the ground floor.
       return {
@@ -563,6 +626,16 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function normaliseBoundarySize(layout: RoomLayout): RoomLayout {
+  const walls = layout.boundaryWalls;
+  if (!walls || walls.length < 3) return layout;
+  const xs = walls.flatMap((wall) => [wall.x1, wall.x2]);
+  const zs = walls.flatMap((wall) => [wall.z1, wall.z2]);
+  const width = Math.max(1, Math.max(...xs) - Math.min(...xs));
+  const height = Math.max(1, Math.max(...zs) - Math.min(...zs));
+  return { ...layout, width, height };
+}
 
 function withLayout(state: LayoutState, update: (layout: RoomLayout) => RoomLayout): LayoutState {
   return { ...state, layout: update(state.layout) };

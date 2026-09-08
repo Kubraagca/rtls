@@ -220,6 +220,8 @@ export interface RoomLayout {
   floorPlanImage?: string;
   floorPlanOpacity?: number;
   floorPlanFitMode?: FloorPlanFitMode;
+  /** Free-form outer boundary used by the 2D editor. */
+  boundaryWalls?: InteriorWall[];
 }
 
 /** Vertical height of a single floor in metres. */

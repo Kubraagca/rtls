@@ -39,9 +39,11 @@ export interface ViewportProps {
   on2DClick?(clientX: number, clientY: number): void;
   on2DMouseDown?(clientX: number, clientY: number): void;
   on2DMouseMove?(clientX: number, clientY: number): void;
+  on2DMouseUp?(): void;
   on2DMouseLeave?(): void;
   on2DWheel?(deltaY: number, clientX: number, clientY: number): void;
   onCatalogDrop?(clientX: number, clientY: number, type: string): void;
+  twoDPlanEditor?: React.ReactNode;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
@@ -94,35 +96,52 @@ export function Viewport(props: ViewportProps): JSX.Element {
             backgroundImage: props.backgroundImage ? `url(${props.backgroundImage})` : undefined,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
+            pointerEvents: props.twoDPlanEditor ? 'none' : 'auto',
           }}
-          onMouseDown={(event) => {
+          onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
             props.on2DMouseDown?.(event.clientX, event.clientY);
           }}
-          onMouseMove={(event) => props.on2DMouseMove?.(event.clientX, event.clientY)}
+          onPointerMove={(event) => props.on2DMouseMove?.(event.clientX, event.clientY)}
           onMouseLeave={() => props.on2DMouseLeave?.()}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+            props.on2DMouseUp?.();
+          }}
           onClick={(event) => props.on2DClick?.(event.clientX, event.clientY)}
           onWheel={(event) => {
             event.preventDefault();
             props.on2DWheel?.(event.deltaY, event.clientX, event.clientY);
           }}
         />
-        {props.view2D && props.drawWallMode && (
+        {props.view2D && props.twoDPlanEditor}
+        {props.view2D && !props.twoDPlanEditor && (
           <div
             aria-label="Duvar çizim alanı"
             style={{
               position: 'absolute',
               inset: 0,
               zIndex: 8,
-              cursor: 'crosshair',
+              cursor: props.drawWallMode ? 'crosshair' : 'default',
               background: 'transparent',
             }}
-            onClick={(event) => {
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
               props.on2DMouseDown?.(event.clientX, event.clientY);
             }}
-            onMouseMove={(event) => props.on2DMouseMove?.(event.clientX, event.clientY)}
+            onPointerMove={(event) => props.on2DMouseMove?.(event.clientX, event.clientY)}
             onMouseLeave={() => props.on2DMouseLeave?.()}
+            onPointerUp={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+              props.on2DMouseUp?.();
+            }}
+            onClick={(event) => {
+              if (!props.drawWallMode) props.on2DClick?.(event.clientX, event.clientY);
+            }}
             onWheel={(event) => {
               event.preventDefault();
               props.on2DWheel?.(event.deltaY, event.clientX, event.clientY);

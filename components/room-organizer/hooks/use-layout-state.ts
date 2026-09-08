@@ -36,6 +36,7 @@ export interface LayoutActions {
   setName(name: string): void;
   setWidth(width: number): void;
   setHeight(height: number): void;
+  resizeRoom(width: number, height: number, shiftX: number, shiftZ: number): void;
   setFloorColor(color: string): void;
   setFloorPattern(pattern: FloorPattern): void;
   setWallPattern(pattern: WallPattern): void;
@@ -64,6 +65,8 @@ export interface LayoutActions {
   bulkSetPositions(positions: ReadonlyMap<string, { x: number; z: number }>): void;
   addInteriorWall(wall: InteriorWall): void;
   addInteriorWalls(walls: readonly InteriorWall[]): void;
+  updateInteriorWall(id: string, patch: Partial<InteriorWall>): void;
+  updateBoundaryWall(id: string, patch: Partial<InteriorWall>): void;
   removeInteriorWall(id: string): void;
   clearInteriorWalls(): void;
   toggleExteriorWall(wallId: WallId): void;

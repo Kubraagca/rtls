@@ -10,6 +10,7 @@ export interface Render2DOptions {
   /** The floor to render — its items, floor colour, etc. */
   floor: FloorLayout;
   selectedItemId: string | null;
+  selectedWallId?: string | null;
   /** Multi-select extras — outlined like the primary so group state is visible (#118). */
   extraSelectedIds?: ReadonlySet<string>;
   showMeasurements: boolean;
@@ -130,8 +131,8 @@ export function render2DTopDown(options: Render2DOptions): void {
 
   drawFloor(ctx, layout, floor, offsetX, offsetY, scale);
   drawGrid(ctx, layout, offsetX, offsetY, scale);
-  drawRoomOutline(ctx, layout, floor, offsetX, offsetY, scale);
-  drawInteriorWalls(ctx, layout, floor, offsetX, offsetY, scale);
+  drawRoomOutline(ctx, layout, floor, offsetX, offsetY, scale, options.selectedWallId);
+  drawInteriorWalls(ctx, layout, floor, offsetX, offsetY, scale, options.selectedWallId);
   if (options.wallPreview) {
     drawWallPreview(ctx, layout, options.wallPreview, offsetX, offsetY, scale);
   }
@@ -367,12 +368,24 @@ function drawFloor(
   scale: number
 ): void {
   void floor;
+  const boundary = layout.boundaryWalls && layout.boundaryWalls.length >= 3 ? layout.boundaryWalls : null;
+  const fillFloor = () => {
+    if (!boundary) {
+      ctx.fillRect(offsetX, offsetY, layout.width * scale, layout.height * scale);
+      return;
+    }
+    ctx.beginPath();
+    ctx.moveTo(offsetX + (boundary[0]!.x1 + layout.width / 2) * scale, offsetY + (boundary[0]!.z1 + layout.height / 2) * scale);
+    for (const wall of boundary) ctx.lineTo(offsetX + (wall.x2 + layout.width / 2) * scale, offsetY + (wall.z2 + layout.height / 2) * scale);
+    ctx.closePath();
+    ctx.fill();
+  };
   const url = layout.floorPlanImage;
   if (url) {
     // Fill the floor colour first so there's a base while (or if) the image is
     // still decoding — avoids a flash of the raw canvas background.
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(offsetX, offsetY, layout.width * scale, layout.height * scale);
+    fillFloor();
 
     // naturalWidth guard: a broken image also reports `complete`, and
     // drawImage on it throws InvalidStateError — which would abort the whole
@@ -381,7 +394,16 @@ function drawFloor(
       const img = floorPlanImageCache.image;
       if (img.naturalWidth > 0) {
         ctx.globalAlpha = layout.floorPlanOpacity ?? 1;
+        if (boundary) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(offsetX + (boundary[0]!.x1 + layout.width / 2) * scale, offsetY + (boundary[0]!.z1 + layout.height / 2) * scale);
+          for (const wall of boundary) ctx.lineTo(offsetX + (wall.x2 + layout.width / 2) * scale, offsetY + (wall.z2 + layout.height / 2) * scale);
+          ctx.closePath();
+          ctx.clip();
+        }
         ctx.drawImage(img, offsetX, offsetY, layout.width * scale, layout.height * scale);
+        if (boundary) ctx.restore();
         ctx.globalAlpha = 1;
       }
       return;
@@ -401,7 +423,7 @@ function drawFloor(
     }
   } else {
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(offsetX, offsetY, layout.width * scale, layout.height * scale);
+    fillFloor();
   }
 }
 
@@ -442,8 +464,32 @@ function drawRoomOutline(
   floor: FloorLayout,
   offsetX: number,
   offsetY: number,
-  scale: number
+  scale: number,
+  selectedWallId?: string | null
 ): void {
+  if (layout.boundaryWalls && layout.boundaryWalls.length >= 3) {
+    const hidden = new Set(floor.hiddenWalls ?? []);
+    ctx.save();
+    ctx.lineCap = 'square';
+    for (const wall of layout.boundaryWalls) {
+      const hiddenWall = hidden.has(wall.id as 'north' | 'south' | 'east' | 'west');
+      ctx.strokeStyle = wall.id === selectedWallId ? '#19c6d1' : hiddenWall ? '#cbd1d5' : '#aeb3b6';
+      ctx.lineWidth = wall.id === selectedWallId ? 9 : hiddenWall ? 2 : 5;
+      if (hiddenWall) ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(offsetX + (wall.x1 + layout.width / 2) * scale, offsetY + (wall.z1 + layout.height / 2) * scale);
+      ctx.lineTo(offsetX + (wall.x2 + layout.width / 2) * scale, offsetY + (wall.z2 + layout.height / 2) * scale);
+      ctx.stroke();
+      drawWallLengthLabel(
+        ctx,
+        offsetX + ((wall.x1 + wall.x2) / 2 + layout.width / 2) * scale,
+        offsetY + ((wall.z1 + wall.z2) / 2 + layout.height / 2) * scale,
+        Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1)
+      );
+    }
+    ctx.restore();
+    return;
+  }
   // Per-edge, not strokeRect: a wall hidden via Wall Visibility (or Delete)
   // reads as a light dashed boundary instead of a solid wall (#118).
   const hidden = new Set(floor.hiddenWalls ?? []);
@@ -460,8 +506,9 @@ function drawRoomOutline(
   for (const edge of edges) {
     const isHidden = hidden.has(edge.id);
     ctx.save();
-    ctx.strokeStyle = isHidden ? '#cbd1d5' : '#aeb3b6';
-    ctx.lineWidth = isHidden ? 2 : 5;
+    const selected = edge.id === selectedWallId;
+    ctx.strokeStyle = selected ? '#19c6d1' : isHidden ? '#cbd1d5' : '#aeb3b6';
+    ctx.lineWidth = selected ? 9 : isHidden ? 2 : 5;
     if (isHidden) ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.moveTo(edge.from[0], edge.from[1]);
@@ -477,17 +524,18 @@ function drawInteriorWalls(
   floor: FloorLayout,
   offsetX: number,
   offsetY: number,
-  scale: number
+  scale: number,
+  selectedWallId?: string | null
 ): void {
   const walls = floor.interiorWalls ?? [];
   if (walls.length === 0) return;
   const halfW = layout.width / 2;
   const halfD = layout.height / 2;
   ctx.save();
-  ctx.strokeStyle = '#9aa1a6';
   ctx.lineCap = 'butt';
-  ctx.lineWidth = 5;
   for (const wall of walls) {
+    ctx.strokeStyle = wall.id === selectedWallId ? '#19c6d1' : '#9aa1a6';
+    ctx.lineWidth = wall.id === selectedWallId ? 9 : 5;
     const x1 = offsetX + (wall.x1 + halfW) * scale;
     const y1 = offsetY + (wall.z1 + halfD) * scale;
     const x2 = offsetX + (wall.x2 + halfW) * scale;
@@ -611,11 +659,11 @@ function drawRoomDimensions(
   ctx.fillStyle = '#333';
   ctx.font = 'bold 12px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText(`${layout.width}m`, offsetX + (layout.width * scale) / 2, offsetY - 10);
+  ctx.fillText(`${layout.width.toFixed(2)}m`, offsetX + (layout.width * scale) / 2, offsetY - 10);
   ctx.save();
   ctx.translate(offsetX - 10, offsetY + (layout.height * scale) / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText(`${layout.height}m`, 0, 0);
+  ctx.fillText(`${layout.height.toFixed(2)}m`, 0, 0);
   ctx.restore();
 }
 

@@ -2,7 +2,7 @@ import { removeAndDispose } from './builder-utils';
 import { buildFloorMaterial } from './floor-patterns';
 import { mergeHoleRects, openingsForWall, type FloorOpening, type WallOpening } from './wall-openings';
 import { buildWallMaterial } from './wall-patterns';
-import type { FloorPattern, FloorPlanFitMode, WallId, WallPattern } from '../lib/types';
+import type { FloorPattern, FloorPlanFitMode, InteriorWall, WallId, WallPattern } from '../lib/types';
 import type * as ThreeNS from 'three';
 
 type ThreeModule = typeof import('three');
@@ -121,6 +121,7 @@ export interface RoomBuilderOptions {
   wallOpenings?: ReadonlyMap<WallId, WallOpening[]>;
   /** Exterior walls that have been removed (open sides). */ 
   hiddenWalls?: readonly WallId[]; 
+  boundaryWalls?: readonly InteriorWall[];
   /** Stairwell openings to cut through this floor's plane. */
   floorOpenings?: readonly FloorOpening[];
   floorPlanImage: string | null;
@@ -144,7 +145,9 @@ export function buildRoom(THREE: ThreeModule, options: RoomBuilderOptions): void
   // When the floor has stairwell openings we use ShapeGeometry so we can
   // punch rectangular holes. Otherwise keep the simpler PlaneGeometry
   // (which also supports displacement subdivision for floor-plan 3D effect).
-  const geometry = hasFloorOpenings && !useDisplacement
+  const geometry = options.boundaryWalls && options.boundaryWalls.length >= 3 && !useDisplacement
+    ? buildBoundaryFloorGeometry(THREE, options.boundaryWalls)
+    : hasFloorOpenings && !useDisplacement
     ? buildFloorGeometryWithOpenings(THREE, options.width, options.depth, options.floorOpenings!)
     : new THREE.PlaneGeometry(options.width, options.depth, useDisplacement ? 100 : 1, useDisplacement ? 100 : 1);
 
@@ -182,7 +185,7 @@ export function buildRoom(THREE: ThreeModule, options: RoomBuilderOptions): void
   // Concrete foundation plinth — only on the ground floor. build-mode houses sit on
   // a low base that extends slightly past the wall plane and grounds the
   // building visually.
-  if (yOffset === 0 && !options.floorPlanImage) {
+  if (yOffset === 0 && !options.floorPlanImage && !(options.boundaryWalls && options.boundaryWalls.length >= 3)) {
     addFoundation(THREE, options.scene, options.width, options.depth, isGhost ? options.ghostOpacity : undefined);
   }
 
@@ -197,9 +200,28 @@ export function buildRoom(THREE: ThreeModule, options: RoomBuilderOptions): void
       yOffset,
       isGhost ? options.ghostOpacity : undefined,
       options.wallOpenings,
-      options.hiddenWalls
+      options.hiddenWalls,
+      options.boundaryWalls
     );
   }
+}
+
+function buildBoundaryFloorGeometry(THREE: ThreeModule, walls: readonly InteriorWall[]): ThreeNS.BufferGeometry {
+  const points = new THREE.Shape();
+  const first = walls[0]!;
+  const vertices = [{ x: first.x1, z: first.z1 }, { x: first.x2, z: first.z2 }];
+  const remaining = walls.slice(1).map((wall) => ({ ...wall }));
+  while (remaining.length > 0) {
+    const current = vertices[vertices.length - 1]!;
+    const index = remaining.findIndex((wall) => Math.hypot(wall.x1 - current.x, wall.z1 - current.z) < 0.01 || Math.hypot(wall.x2 - current.x, wall.z2 - current.z) < 0.01);
+    if (index < 0) break;
+    const next = remaining.splice(index, 1)[0]!;
+    if (Math.hypot(next.x1 - current.x, next.z1 - current.z) < 0.01) vertices.push({ x: next.x2, z: next.z2 });
+    else vertices.push({ x: next.x1, z: next.z1 });
+  }
+  for (const vertex of vertices) points.lineTo(vertex.x, -vertex.z);
+  points.closePath();
+  return new THREE.ShapeGeometry(points);
 }
 
 const FOUNDATION_OVERHANG = 0.18;
@@ -413,17 +435,23 @@ function buildWalls(
   yOffset = 0,
   ghostOpacity?: number,
   openings?: ReadonlyMap<WallId, WallOpening[]>,
-  hiddenWalls?: readonly WallId[]
+  hiddenWalls?: readonly WallId[],
+  boundaryWalls?: readonly InteriorWall[]
 ): void {
   const wallHeight = 3;
   const centerY = yOffset + wallHeight / 2;
 
   const wallSpecs: ReadonlyArray<{
-    id: WallId;
+    id: string;
     width: number;
     rotateY: number;
     position: [number, number, number];
-  }> = [
+  }> = boundaryWalls && boundaryWalls.length >= 3 ? boundaryWalls.map((wall) => ({
+    id: wall.id,
+    width: Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1),
+    rotateY: Math.atan2(-(wall.z2 - wall.z1), wall.x2 - wall.x1),
+    position: [(wall.x1 + wall.x2) / 2, centerY, (wall.z1 + wall.z2) / 2] as [number, number, number],
+  })) : [
     { id: 'north', width, rotateY: 0, position: [0, centerY, -depth / 2] },
     { id: 'south', width, rotateY: Math.PI, position: [0, centerY, depth / 2] },
     { id: 'west', width: depth, rotateY: Math.PI / 2, position: [-width / 2, centerY, 0] },
@@ -431,21 +459,22 @@ function buildWalls(
   ];
 
   for (const spec of wallSpecs) {
-    if (hiddenWalls?.includes(spec.id)) continue;
-    const color = colors?.[spec.id] ?? hexFromInt(DEFAULT_WALL_COLOR);
+    if (hiddenWalls?.includes(spec.id as WallId)) continue;
+    const color = colors?.[spec.id as WallId] ?? hexFromInt(DEFAULT_WALL_COLOR);
     const material = buildWallMaterial(THREE, {
       pattern: pattern ?? 'solid',
       color,
       width: spec.width,
       height: wallHeight,
     });
+    material.side = THREE.DoubleSide;
 
     if (ghostOpacity !== undefined) {
       material.transparent = true;
       material.opacity *= ghostOpacity;
     }
 
-    const wallCutouts = openings ? openingsForWall(openings, spec.id) : [];
+    const wallCutouts = openings && (spec.id === 'north' || spec.id === 'south' || spec.id === 'east' || spec.id === 'west') ? openingsForWall(openings, spec.id) : [];
     const geometry =
       wallCutouts.length > 0
         ? buildWallGeometryWithCutouts(THREE, spec.width, wallHeight, wallCutouts)
@@ -455,7 +484,12 @@ function buildWalls(
     wall.rotation.y = spec.rotateY;
     wall.position.set(spec.position[0], spec.position[1], spec.position[2]);
     wall.userData.type = ROOM_OBJECT_TAGS.Wall;
-    wall.userData.wallId = spec.id;
+    const legacyWallId = spec.id.replace('outer-', '');
+    const sourceWall = boundaryWalls?.find((wall) => wall.id === spec.id);
+    const axisAligned = !sourceWall || Math.abs(sourceWall.x2 - sourceWall.x1) < 0.001 || Math.abs(sourceWall.z2 - sourceWall.z1) < 0.001;
+    if (axisAligned && (legacyWallId === 'north' || legacyWallId === 'south' || legacyWallId === 'east' || legacyWallId === 'west')) {
+      wall.userData.wallId = legacyWallId;
+    }
     makeStatic(wall);
     scene.add(wall);
 
@@ -476,7 +510,7 @@ const BASEBOARD_COLOR = 0xc7cac8;
 function addBaseboard(
   THREE: ThreeModule,
   scene: ThreeNS.Scene,
-  spec: { id: WallId; width: number; rotateY: number; position: readonly [number, number, number] },
+  spec: { id: string; width: number; rotateY: number; position: readonly [number, number, number] },
   yOffset: number,
   ghostOpacity?: number
 ): void {
@@ -506,7 +540,10 @@ function addBaseboard(
   }
   base.receiveShadow = true;
   base.userData.type = ROOM_OBJECT_TAGS.Wall;
-  base.userData.wallId = spec.id;
+  const legacyWallId = spec.id.replace('outer-', '');
+  if (legacyWallId === 'north' || legacyWallId === 'south' || legacyWallId === 'east' || legacyWallId === 'west') {
+    base.userData.wallId = legacyWallId;
+  }
   makeStatic(base);
   scene.add(base);
 }

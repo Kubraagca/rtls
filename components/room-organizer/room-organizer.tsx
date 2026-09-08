@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
+import { FloorPlanEditor } from './canvas-2d/floor-plan-editor';
 import { worldPositionFrom2DClient } from './canvas-2d/render';
 import { RoomEditorProvider, type RoomEditorContextValue } from './contexts/room-editor-context';
 import { SelectionProvider, type SelectionContextValue } from './contexts/selection-context';
@@ -43,6 +44,7 @@ import { WallDisplayPill } from './panels/wall-display-pill';
 import { WelcomeBanner } from './panels/welcome-banner';
 import type { HoverInfo } from './hooks/use-three-scene';
 import type { GameMode } from './lib/types';
+
 import type { CatalogItem, RoomLayout, ViewSettings, WallId } from './lib/types';
 
 function orbitCamera(
@@ -171,12 +173,27 @@ export function RoomOrganizer(): JSX.Element {
   const [measurementPoints, setMeasurementPoints] = useState<ReadonlyArray<{ x: number; z: number }>>([]);
   const [wallDraft, setWallDraft] = useState<{ x: number; z: number } | null>(null);
   const [pointerWorld, setPointerWorld] = useState<{ x: number; z: number } | null>(null);
+  const wallDragRef = useRef<{
+    id: string;
+    mode: 'start' | 'end' | 'move' | 'exterior';
+    edge?: 'north' | 'south' | 'east' | 'west';
+    last: { x: number; z: number };
+    startPoint?: { x: number; z: number };
+    startWidth?: number;
+    startHeight?: number;
+    startClientX?: number;
+    startClientY?: number;
+    startScale?: number;
+    startPanX?: number;
+    startPanY?: number;
+  } | null>(null);
+  const lastWallResizeRef = useRef(0);
 
   const wallSnapResult = useMemo(() => {
     if (!view.drawWallMode || !pointerWorld) return null;
     return snapWallEndpoint({
       point: pointerWorld,
-      existingWalls: activeFloor.interiorWalls ?? [],
+    existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
       fromPoint: wallDraft,
       roomWidth: layout.width,
       roomDepth: layout.height,
@@ -210,7 +227,7 @@ export function RoomOrganizer(): JSX.Element {
       if (view.drawWallMode) {
         const snapped = snapWallEndpoint({
           point: { x, z },
-          existingWalls: activeFloor.interiorWalls ?? [],
+          existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
           fromPoint: wallDraft,
           roomWidth: layout.width,
           roomDepth: layout.height,
@@ -313,7 +330,7 @@ export function RoomOrganizer(): JSX.Element {
       (rect.width - 120) / layout.width,
       (rect.height - 120) / layout.height
     );
-    const tolerance = Math.max(0.12, 9 / Math.max(1, baseScale * planCamera.zoom));
+    const tolerance = Math.max(0.35, 20 / Math.max(1, baseScale * planCamera.zoom));
     let nearest: { id: string; distance: number } | null = null;
     for (const wall of activeFloor.interiorWalls ?? []) {
       const distance = distanceToSegment(point, wall);
@@ -321,12 +338,158 @@ export function RoomOrganizer(): JSX.Element {
         nearest = { id: wall.id, distance };
       }
     }
-    setSelectedWall(nearest ? { id: nearest.id, kind: 'interior' } : null);
+    if (nearest) {
+      setSelectedWall({ id: nearest.id, kind: 'interior' });
+    } else {
+      const edges = [
+        { id: 'north', distance: Math.abs(point.z + layout.height / 2) },
+        { id: 'south', distance: Math.abs(point.z - layout.height / 2) },
+        { id: 'west', distance: Math.abs(point.x + layout.width / 2) },
+        { id: 'east', distance: Math.abs(point.x - layout.width / 2) },
+      ] as const;
+      const edge = edges.reduce((best, candidate) => candidate.distance < best.distance ? candidate : best);
+      setSelectedWall(edge.distance <= tolerance ? { id: edge.id, kind: 'exterior' } : null);
+    }
     if (nearest) {
       setSelectedItemId(null);
       setExtraSelectedIds(new Set());
     }
   }, [activeFloor.interiorWalls, layout, planCamera, view.drawWallMode]);
+
+  const handle2DWallMouseDown = useCallback((clientX: number, clientY: number) => {
+    if (view.measurementMode) {
+      const canvas = canvas2DRef.current;
+      const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
+      if (point) handleEmptyClick(point.x, point.z, false, false, false);
+      return;
+    }
+    const canvas = canvas2DRef.current;
+    if (!canvas) return;
+    const point = worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true });
+    if (!point) return;
+    // Drawing mode owns the pointer completely. Do not let the same pointer
+    // press fall through to the wall move/resize hit testing below.
+    if (view.drawWallMode) {
+      wallDragRef.current = null;
+      handleEmptyClick(point.x, point.z, false, false, false);
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const baseScale = Math.min((rect.width - 120) / layout.width, (rect.height - 120) / layout.height) * planCamera.zoom;
+    // The rendered wall is only a few pixels wide, so use a comfortable
+    // world-space hit area to make drag-and-drop practical at every zoom.
+    const tolerance = Math.max(0.35, 20 / Math.max(1, baseScale));
+    let nearest: { id: string; mode: 'start' | 'end' | 'move'; distance: number } | null = null;
+    for (const wall of activeFloor.interiorWalls ?? []) {
+      const startDistance = Math.hypot(point.x - wall.x1, point.z - wall.z1);
+      const endDistance = Math.hypot(point.x - wall.x2, point.z - wall.z2);
+      const segmentDistance = distanceToSegment(point, wall);
+      const hit = startDistance <= tolerance
+        ? { mode: 'start' as const, distance: startDistance }
+        : endDistance <= tolerance
+          ? { mode: 'end' as const, distance: endDistance }
+          : segmentDistance <= tolerance
+            ? { mode: 'move' as const, distance: segmentDistance }
+            : null;
+      if (hit && (!nearest || hit.distance < nearest.distance)) nearest = { id: wall.id, ...hit };
+    }
+    if (nearest) {
+      setSelectedWall({ id: nearest.id, kind: 'interior' });
+      setSelectedItemId(null);
+      setExtraSelectedIds(new Set());
+      wallDragRef.current = { id: nearest.id, mode: nearest.mode, last: point };
+    } else {
+      const edges = [
+        { id: 'north', distance: Math.abs(point.z + layout.height / 2) },
+        { id: 'south', distance: Math.abs(point.z - layout.height / 2) },
+        { id: 'west', distance: Math.abs(point.x + layout.width / 2) },
+        { id: 'east', distance: Math.abs(point.x - layout.width / 2) },
+      ] as const;
+      const edge = edges.reduce((best, candidate) => candidate.distance < best.distance ? candidate : best);
+      if (edge.distance <= tolerance) {
+        setSelectedWall({ id: edge.id, kind: 'exterior' });
+        setSelectedItemId(null);
+        setExtraSelectedIds(new Set());
+        wallDragRef.current = {
+          id: edge.id,
+          mode: 'exterior',
+          edge: edge.id,
+          last: point,
+          startPoint: point,
+          startWidth: layout.width,
+          startHeight: layout.height,
+          startClientX: clientX,
+          startClientY: clientY,
+          startScale: baseScale,
+          startPanX: planCamera.panX,
+          startPanY: planCamera.panY,
+        };
+      } else if (view.drawWallMode) handleEmptyClick(point.x, point.z, false, false, false);
+    }
+  }, [activeFloor.interiorWalls, handleEmptyClick, layout, planCamera, view.drawWallMode, view.measurementMode]);
+
+  const handle2DWallMouseMove = useCallback((clientX: number, clientY: number) => {
+    const drag = wallDragRef.current;
+    if (!drag) return;
+    const canvas = canvas2DRef.current;
+    const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
+    const wall = activeFloor.interiorWalls?.find((entry) => entry.id === drag.id);
+    if (!point) return;
+    if (drag.mode === 'exterior' && drag.startWidth && drag.startHeight && drag.startScale) {
+      const now = performance.now();
+      // Pointer events can arrive at 120–240 Hz, while every resize rebuilds
+      // the room scene. Keep the interaction responsive without rebuilding on
+      // every hardware event.
+      if (now - lastWallResizeRef.current < 24) return;
+      lastWallResizeRef.current = now;
+      const startScale = drag.startScale;
+      const horizontal = drag.edge === 'east' || drag.edge === 'west';
+      const pointerDelta = horizontal
+        ? clientX - (drag.startClientX ?? clientX)
+        : clientY - (drag.startClientY ?? clientY);
+      const delta = pointerDelta / startScale * 2 * (drag.edge === 'west' || drag.edge === 'north' ? -1 : 1);
+      if (horizontal) {
+        const width = Math.max(1, drag.startWidth + delta);
+        const actualDelta = width - drag.startWidth;
+        actions.resizeRoom(
+          width,
+          drag.startHeight,
+          drag.edge === 'east' ? -actualDelta / 2 : actualDelta / 2,
+          0
+        );
+        setPlanCamera((camera) => ({
+          ...camera,
+          panX: (drag.startPanX ?? camera.panX) + (drag.edge === 'east' ? 1 : -1) * delta * startScale / 2,
+        }));
+      } else {
+        const height = Math.max(1, drag.startHeight + delta);
+        const actualDelta = height - drag.startHeight;
+        actions.resizeRoom(
+          drag.startWidth,
+          height,
+          0,
+          drag.edge === 'south' ? -actualDelta / 2 : actualDelta / 2
+        );
+        setPlanCamera((camera) => ({
+          ...camera,
+          panY: (drag.startPanY ?? camera.panY) + (drag.edge === 'south' ? 1 : -1) * delta * startScale / 2,
+        }));
+      }
+      return;
+    }
+    if (!wall) return;
+    const dx = point.x - drag.last.x;
+    const dz = point.z - drag.last.z;
+    if (drag.mode === 'start') actions.updateInteriorWall(wall.id, { x1: point.x, z1: point.z });
+    else if (drag.mode === 'end') actions.updateInteriorWall(wall.id, { x2: point.x, z2: point.z });
+    else actions.updateInteriorWall(wall.id, { x1: wall.x1 + dx, z1: wall.z1 + dz, x2: wall.x2 + dx, z2: wall.z2 + dz });
+    drag.last = point;
+  }, [actions, activeFloor.interiorWalls, layout, planCamera]);
+
+  const handle2DWallMouseUp = useCallback(() => {
+    wallDragRef.current = null;
+    lastWallResizeRef.current = 0;
+  }, []);
 
   // Reset wall draft + wall selection whenever draw mode flips off.
   useEffect(() => {
@@ -1101,18 +1264,16 @@ export function RoomOrganizer(): JSX.Element {
         canvas2DRef={canvas2DRef}
         backgroundColor={view.backgroundColor}
         backgroundImage={view.backgroundImage}
-        on2DMouseDown={(clientX, clientY) => {
-          const canvas = canvas2DRef.current;
-          const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
-          if (point) handleEmptyClick(point.x, point.z, true, true, false);
-        }}
+        on2DMouseDown={handle2DWallMouseDown}
         on2DClick={handle2DWallSelect}
         on2DMouseMove={(clientX, clientY) => {
+          handle2DWallMouseMove(clientX, clientY);
           if (!view.drawWallMode) return;
           const canvas = canvas2DRef.current;
           const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
           setPointerWorld(point);
         }}
+        on2DMouseUp={handle2DWallMouseUp}
         on2DMouseLeave={() => setPointerWorld(null)}
         on2DWheel={handle2DWheel}
         hover={
@@ -1135,6 +1296,46 @@ export function RoomOrganizer(): JSX.Element {
           const newId = placeCatalogItem(item, world ?? undefined);
           selectOnly(newId);
         }}
+        twoDPlanEditor={
+          view.view2D ? (
+            <FloorPlanEditor
+              layout={layout}
+              floor={activeFloor}
+              selectedWallId={selectedWall?.id ?? null}
+              selectedItemId={selectedItem?.id ?? null}
+              planZoom={planCamera.zoom}
+              planPanX={planCamera.panX}
+              planPanY={planCamera.panY}
+              actions={actions}
+              onSelectWall={(id, kind = 'interior') => {
+                setSelectedWall(id ? { id, kind } : null);
+                setSelectedItemId(null);
+                setExtraSelectedIds(new Set());
+              }}
+              onSelectItem={(id) => {
+                if (id) {
+                  selectOnly(id);
+                  setSelectedWall(null);
+                } else {
+                  setSelectedItemId(null);
+                  setExtraSelectedIds(new Set());
+                }
+              }}
+              onWheel={handle2DWheel}
+              onResizePan={(x, y) => setPlanCamera((current) => ({ ...current, panX: current.panX + x, panY: current.panY + y }))}
+              wallDraft={wallDraft}
+              pointerWorld={pointerWorld}
+              onPointerMove={(clientX, clientY) => {
+                handle2DWallMouseMove(clientX, clientY);
+                if (!view.drawWallMode) return;
+                const canvas = canvas2DRef.current;
+                const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
+                setPointerWorld(point);
+              }}
+              onPointerDown={handle2DWallMouseDown}
+            />
+          ) : null
+        }
       />
 
       {gameMode !== 'live' && (
@@ -1359,6 +1560,13 @@ export function RoomOrganizer(): JSX.Element {
             orbitCamera(THREE, camera, controls, direction);
         }}
         onZoom={(direction) => {
+          if (view.view2D) {
+            setPlanCamera((current) => ({
+              ...current,
+              zoom: Math.max(0.5, Math.min(4, current.zoom * (direction === '+' ? 1.12 : 0.89))),
+            }));
+            return;
+          }
           const camera = cameraRef.current;
           const controls = controlsRef.current;
           if (camera && controls) zoomCamera(camera, controls, direction);

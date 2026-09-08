@@ -23,7 +23,7 @@ export function HeaderStats({
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
       <Chip icon="box" label="Eşya" value={allItems.length.toString()} />
       <Chip icon="stairs" label="Kat" value={layout.floors.length.toString()} />
-      <Chip icon="ruler" label="Alan" value={`${layout.width}m × ${layout.height}m`} />
+      <Chip icon="ruler" label="Alan" value={`${layout.width.toFixed(2)}m × ${layout.height.toFixed(2)}m`} />
       <SaveIndicator lastSavedAt={lastSavedAt} saving={saving} saveError={saveError} />
     </div>
   );

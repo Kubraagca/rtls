@@ -311,6 +311,7 @@ export function useSceneEffects({
         wallColors: floor.wallColors,
         wallOpenings,
         hiddenWalls: floor.hiddenWalls,
+        boundaryWalls: layout.boundaryWalls,
         floorOpenings,
         floorPlanImage: index === 0 ? layout.floorPlanImage ?? null : null,
         floorPlanOpacity: layout.floorPlanOpacity ?? 0.5,
@@ -340,7 +341,7 @@ export function useSceneEffects({
     // interior walls (nearest wall wins), so the exterior hole set changes
     // when interior walls do — without this dep a door claimed by a new
     // interior wall stays double-cut into the exterior wall (#119).
-    layout.width, layout.height, shellFinishesKey, wallOpeningsKey, interiorWallsKey,
+    layout.width, layout.height, layout.boundaryWalls, shellFinishesKey, wallOpeningsKey, interiorWallsKey,
     layout.floorPlanImage, layout.floorPlanOpacity, layout.floorPlanFitMode,
     view.floorPlan3DEffect, view.showAllFloors, view.wallDisplay,
     activeFloorIndex,
@@ -906,6 +907,7 @@ export function useSceneEffects({
         layout,
         floor: visibleActiveFloor,
         selectedItemId,
+        selectedWallId: selectedWall?.id ?? null,
         extraSelectedIds,
         showMeasurements: view.showMeasurements,
         showWiFiSignals: view.showWiFiSignals,
@@ -939,7 +941,7 @@ export function useSceneEffects({
       window.removeEventListener('catalog-thumbnails-ready', paint);
       removeRepaintHandler();
     };
-  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, selectedItemId, extraSelectedIds, planZoom, planPanX, planPanY, wallDraft, pointerWorld]);
+  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, selectedItemId, selectedWall, extraSelectedIds, planZoom, planPanX, planPanY, wallDraft, pointerWorld]);
 }
 
 export { measurementDistance } from '../three/measurement';
