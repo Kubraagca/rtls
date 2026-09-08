@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useRoomEditor } from '../contexts';
 import { useActiveFloorIndex, useLayoutActions, useLayoutStore } from '../hooks/use-layout-store';
 import { MAX_FLOORS } from '../lib/constants';
 import { Icon } from '../plotcraft/icon';
@@ -14,7 +13,6 @@ export function FloorSwitcher(): JSX.Element {
   const floors = useLayoutStore((s) => s.layout.floors);
   const activeFloorIndex = useActiveFloorIndex();
   const actions = useLayoutActions();
-  const { view, toggle } = useRoomEditor();
   const [renaming, setRenaming] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
 
@@ -41,24 +39,6 @@ export function FloorSwitcher(): JSX.Element {
           Katlar
         </h3>
         <div style={{ display: 'flex', gap: 4 }}>
-          <button
-            type="button"
-            onClick={() => toggle('showAllFloors')}
-            className={`pc-tile${view.showAllFloors ? ' pc-tile--active' : ''}`}
-            title="Tüm katları göster (alt katlar saydam görünür)"
-            style={{
-              height: 26,
-              padding: '0 10px',
-              borderRadius: 8,
-              fontFamily: 'var(--pc-font-display)',
-              fontWeight: 700,
-              fontSize: 10,
-              letterSpacing: 'var(--pc-tr-caps)',
-              textTransform: 'uppercase',
-            }}
-          >
-            Tümü
-          </button>
           <button
             type="button"
             onClick={() => actions.duplicateFloor(activeFloorIndex)}
@@ -128,7 +108,6 @@ export function FloorSwitcher(): JSX.Element {
                 type="button"
                 onClick={() => {
                   actions.setActiveFloorIndex(index);
-                  if (view.showAllFloors) toggle('showAllFloors');
                 }}
                 className={`pc-tile${isActive ? ' pc-tile--active' : ''}`}
                 aria-current={isActive ? 'true' : undefined}

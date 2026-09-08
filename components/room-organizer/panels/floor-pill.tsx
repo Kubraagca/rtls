@@ -10,7 +10,7 @@ import { Icon } from '../plotcraft/icon';
  * still live in the sidebar's FloorSwitcher.
  */
 export function FloorPill(): JSX.Element {
-  const { layout, activeFloorIndex, actions, view, toggle } = useRoomEditor();
+  const { layout, activeFloorIndex, actions } = useRoomEditor();
   const floors = layout.floors;
   const canAdd = floors.length < MAX_FLOORS;
   // Top floor first — matches real-world expectations and FloorSwitcher.
@@ -66,7 +66,6 @@ export function FloorPill(): JSX.Element {
               type="button"
               onClick={() => {
                 actions.setActiveFloorIndex(index);
-                if (view.showAllFloors) toggle('showAllFloors');
               }}
               title={`${floor.name} · ${floor.items.length} item${floor.items.length === 1 ? '' : 's'}`}
               aria-current={isActive ? 'true' : undefined}
@@ -111,30 +110,6 @@ export function FloorPill(): JSX.Element {
         <Icon name="plusminus" size={12} />
       </button>
 
-      {floors.length > 1 && (
-        <button
-          type="button"
-          onClick={() => toggle('showAllFloors')}
-          title="Tüm katları göster"
-          aria-pressed={view.showAllFloors}
-          className={`pc-tile${view.showAllFloors ? ' pc-tile--active' : ''}`}
-          style={{
-            height: 26,
-            padding: '0 8px',
-            borderRadius: 7,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: 'var(--pc-font-display)',
-            fontWeight: 800,
-            fontSize: 9,
-            letterSpacing: 'var(--pc-tr-caps)',
-            textTransform: 'uppercase',
-          }}
-        >
-          Tümü
-        </button>
-      )}
     </div>
   );
 }
