@@ -2,6 +2,10 @@ import { useEffect, useRef } from 'react';
 import type * as ThreeNS from 'three';
 import type { OrbitControls as OrbitControlsType } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { PointerLockControls as PointerLockControlsType } from 'three/examples/jsm/controls/PointerLockControls.js';
+import type { FurnitureItem } from '../lib/types';
+import { prepareFirstPersonBody } from '../three/first-person-body';
+import { cloneAndFitOfficeAvatar, loadOfficeSittingAvatar, loadFemaleOfficeSittingAvatar } from '../three/office-avatar';
+import { disposeObject } from '../three/builder-utils';
 
 type ThreeModule = typeof import('three');
 
@@ -22,6 +26,8 @@ export interface UseWalkthroughOptions {
   avatarId?: string;
   startRotation?: number;
   onAvatarExit?: (id: string, position: { x: number; z: number }, rotation: number) => void;
+  items?: readonly FurnitureItem[];
+  floorY?: number;
   /** Request a render on the next animation frame (render-on-demand). */
   invalidate?: () => void;
   /**
@@ -81,6 +87,8 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
     avatarId,
     startRotation = 0,
     onAvatarExit,
+    items = [],
+    floorY = 0,
     invalidate,
     onExit,
   } = options;
@@ -130,7 +138,32 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
     let controls: PointerLockControlsType | null = null;
     let savedCameraPosition: ThreeNS.Vector3 | null = null;
     let avatarGroup: ThreeNS.Object3D | null = null;
-    const originalLayers = new Map<ThreeNS.Object3D, number>();
+    let sitting = false;
+    let standingPosition: ThreeNS.Vector3 | null = null;
+    const bodyEye = new THREE.Vector3();
+    const bodyMaterials = prepareFirstPersonBody(bodyEye);
+    let bodyYaw = startRotation;
+    let seatYaw = startRotation;
+    let seatedModel: ThreeNS.Group | null = null;
+    let seatedMixer: ThreeNS.AnimationMixer | null = null;
+    const childVisibility = new Map<ThreeNS.Object3D, boolean>();
+    const avatarItem = items.find((item) => item.id === avatarId);
+    const loader = avatarItem?.type === 'female-office-avatar' ? loadFemaleOfficeSittingAvatar : loadOfficeSittingAvatar;
+    if (avatarItem?.type === 'office-avatar' || avatarItem?.type === 'female-office-avatar') {
+      void loader(THREE).then((asset) => {
+        if (!asset || cancelled) return;
+        const instance = cloneAndFitOfficeAvatar(THREE, asset, avatarItem.height, { addBadge: false, castShadow: false });
+        seatedModel = instance.model;
+        const clip = instance.animations[avatarItem.type === 'female-office-avatar' && instance.animations.length > 1 ? 1 : 0];
+        if (clip) {
+          seatedMixer = new THREE.AnimationMixer(seatedModel);
+          seatedMixer.clipAction(clip).play();
+          seatedMixer.update(0.1);
+        }
+        syncAvatar();
+        invalidateRef.current?.();
+      });
+    }
     const savedQuaternion = camera.quaternion.clone();
     const facing = new THREE.Vector3();
     let rafId = 0;
@@ -144,18 +177,67 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
         });
       }
       if (!avatarGroup) return;
-      avatarGroup.position.x = camera.position.x;
-      avatarGroup.position.z = camera.position.z;
       camera.getWorldDirection(facing);
-      avatarGroup.rotation.y = Math.atan2(facing.x, facing.z);
-      avatarGroup.traverse((node) => {
-        if (!originalLayers.has(node)) originalLayers.set(node, node.layers.mask);
-        node.layers.set(1);
-      });
+      if (!sitting && Math.hypot(facing.x, facing.z) > 0.01) bodyYaw = Math.atan2(facing.x, facing.z);
+      const yaw = sitting ? seatYaw : bodyYaw;
+      avatarGroup.position.x = camera.position.x - Math.sin(yaw) * 0.08;
+      avatarGroup.position.z = camera.position.z - Math.cos(yaw) * 0.08;
+      avatarGroup.rotation.y = yaw;
+      if (seatedModel && seatedModel.parent !== avatarGroup) avatarGroup.add(seatedModel);
+      for (const child of avatarGroup.children) {
+        if (child === seatedModel) { child.visible = sitting; continue; }
+        if (!childVisibility.has(child)) childVisibility.set(child, child.visible);
+        child.visible = sitting && seatedModel ? false : childVisibility.get(child)!;
+      }
+      bodyEye.copy(camera.position);
+      bodyMaterials.attach(avatarGroup);
     };
 
+    const clampSeatedLook = (): void => {
+      if (!sitting) return;
+      camera.rotation.reorder('YXZ');
+      const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+      const seatedCenterYaw = seatYaw + Math.PI;
+      let yawDelta = euler.y - seatedCenterYaw;
+      while (yawDelta > Math.PI) yawDelta -= Math.PI * 2;
+      while (yawDelta < -Math.PI) yawDelta += Math.PI * 2;
+      const limitedYaw = Math.max(-Math.PI * 0.55, Math.min(Math.PI * 0.55, yawDelta));
+      const limitedPitch = Math.max(-Math.PI * 0.42, Math.min(Math.PI * 0.42, euler.x));
+      camera.rotation.set(limitedPitch, seatedCenterYaw + limitedYaw, 0, 'YXZ');
+    };
+
+    const isSeat = (type: string): boolean => ['office-chair', 'conference-chair', 'chair', 'dining-chair', 'armchair', 'sofa', 'gltf-chair', 'gltf-sofa'].includes(type);
+    const toggleSitting = (): void => {
+      if (sitting) {
+        sitting = false;
+        if (standingPosition) camera.position.copy(standingPosition);
+        camera.position.y = eyeHeightRef.current;
+        standingPosition = null;
+        syncAvatar();
+        invalidateRef.current?.();
+        return;
+      }
+      let nearest: FurnitureItem | null = null;
+      let nearestDistance = 1.45;
+      for (const item of items) {
+        if (!item.position || !isSeat(item.type)) continue;
+        const distance = Math.hypot(item.position.x - camera.position.x, item.position.z - camera.position.z);
+        if (distance < nearestDistance) { nearest = item; nearestDistance = distance; }
+      }
+      if (!nearest?.position) return;
+      standingPosition = camera.position.clone();
+      camera.position.set(nearest.position.x, floorY + 1.05, nearest.position.z);
+      sitting = true;
+      seatYaw = nearest.rotation ?? 0;
+      pressed.clear();
+      camera.lookAt(camera.position.x + Math.sin(seatYaw), camera.position.y, camera.position.z + Math.cos(seatYaw));
+      syncAvatar();
+      invalidateRef.current?.();
+    };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (MOVEMENT_KEYS.has(event.code) && controls?.isLocked) { event.preventDefault(); pressed.add(event.code); }
+      if (!controls?.isLocked) return;
+      if (event.code === 'KeyE') { event.preventDefault(); if (!event.repeat) toggleSitting(); return; }
+      if (MOVEMENT_KEYS.has(event.code)) { event.preventDefault(); pressed.add(event.code); }
     };
     const onKeyUp = (event: KeyboardEvent) => pressed.delete(event.code);
     // Escape exit: the browser reserves the first Escape to release pointer
@@ -208,8 +290,16 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
       cleanup.push(() => controls?.unlock());
       cleanup.push(() => controls?.disconnect());
       cleanup.push(() => {
-        originalLayers.forEach((mask, node) => { node.layers.mask = mask; });
+        if (sitting && standingPosition) {
+          sitting = false;
+          camera.position.copy(standingPosition);
+          syncAvatar();
+        }
+        bodyMaterials.dispose();
+        childVisibility.forEach((visible, node) => { node.visible = visible; });
         if (avatarGroup) onAvatarExitRef.current?.(avatarId, { x: avatarGroup.position.x, z: avatarGroup.position.z }, avatarGroup.rotation.y);
+        seatedMixer?.stopAllAction();
+        if (seatedModel) { seatedModel.removeFromParent(); disposeObject(seatedModel); }
       });
       cleanup.push(() => {
         if (savedCameraPosition) camera.position.copy(savedCameraPosition);
@@ -230,6 +320,7 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
         const delta = Math.min(0.05, (now - lastTime) / 1000);
         lastTime = now;
 
+        clampSeatedLook();
         syncAvatar();
         if (!controls?.isLocked) return;
         // Walkthrough is an active mode: mouse-look mutates the camera outside
@@ -237,6 +328,7 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
         invalidateRef.current?.();
 
         const sprint = pressed.has('ShiftLeft') || pressed.has('ShiftRight');
+        if (sitting) { seatedMixer?.update(delta); return; }
         const speed = walkSpeedRef.current * (sprint ? 2 : 1);
 
         let dz = 0;
@@ -278,5 +370,5 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
       }
       if (orbit) orbit.enabled = true;
     };
-  }, [enabled, canvasRef, threeModuleRef, cameraRef, orbitRef, sceneRef, avatarId, startPosition, startRotation]);
+  }, [enabled, canvasRef, threeModuleRef, cameraRef, orbitRef, sceneRef, avatarId, startPosition, startRotation, items, floorY]);
 }

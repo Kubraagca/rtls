@@ -934,6 +934,8 @@ export function RoomOrganizer(): JSX.Element {
     startPosition: possessedAvatar?.position,
     startRotation: possessedAvatar?.rotation,
     avatarId: possessedAvatar?.id,
+    items: activeFloor.items,
+    floorY: activeFloorY,
     onAvatarExit: (id, position, rotation) => actions.updateItem(id, { position, rotation }),
     onExit: useCallback(() => {
       setView((v) => (v.walkthroughMode ? { ...v, walkthroughMode: false } : v));
