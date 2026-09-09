@@ -266,6 +266,55 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
       }
     };
 
+    // Treat the avatar as a small cylinder and furniture as rotated boxes on
+    // the floor. Testing the proposed position instead of raycasting the view
+    // lets the player pass through any real gap and naturally slide along the
+    // first blocked axis rather than getting stuck at a corner.
+    const AVATAR_COLLISION_RADIUS = 0.2;
+    const NON_BLOCKING_TYPES = new Set([
+      'rug', 'painting', 'mirror', 'curtains', 'wall-shelf', 'wall-clock',
+      'pendant-light', 'door', 'window', 'security-camera', 'wifi', 'router',
+      'cctv', 'computer', 'printer', 'books', 'candles', 'vase',
+    ]);
+    const canOccupy = (x: number, z: number): boolean => {
+      for (const item of items) {
+        if (!item.position || item.id === avatarId) continue;
+        // Items placed on top of furniture and wall/ceiling decorations do
+        // not occupy walking space. Their editor footprint can otherwise
+        // falsely close a corridor that is visibly open in the scene.
+        if ((item.elevation ?? 0) > 0.05 || NON_BLOCKING_TYPES.has(item.type)) continue;
+        const halfWidth = Math.max(0.06, item.width / 2);
+        const halfDepth = Math.max(0.06, item.depth / 2);
+        const rotation = item.rotation ?? 0;
+        const cos = Math.cos(rotation);
+        const sin = Math.sin(rotation);
+        const dx = x - item.position.x;
+        const dz = z - item.position.z;
+        const localX = cos * dx - sin * dz;
+        const localZ = sin * dx + cos * dz;
+        const nearestX = Math.max(-halfWidth, Math.min(halfWidth, localX));
+        const nearestZ = Math.max(-halfDepth, Math.min(halfDepth, localZ));
+        const distanceX = localX - nearestX;
+        const distanceZ = localZ - nearestZ;
+        if (distanceX * distanceX + distanceZ * distanceZ < AVATAR_COLLISION_RADIUS ** 2) return false;
+      }
+      return true;
+    };
+
+    const moveWithCollisions = (dx: number, dz: number): void => {
+      const nextX = camera.position.x + dx;
+      const nextZ = camera.position.z + dz;
+      if (canOccupy(nextX, nextZ)) {
+        camera.position.x = nextX;
+        camera.position.z = nextZ;
+        return;
+      }
+      // Sliding one axis at a time keeps the movement responsive when only a
+      // diagonal corner is blocked, and allows the player to walk around it.
+      if (canOccupy(nextX, camera.position.z)) camera.position.x = nextX;
+      if (canOccupy(camera.position.x, nextZ)) camera.position.z = nextZ;
+    };
+
     void (async () => {
       const controlsModule = await import('three/examples/jsm/controls/PointerLockControls.js');
       if (cancelled) return;
@@ -349,8 +398,12 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
         right.crossVectors(forward, camera.up).normalize();
 
         const distance = speed * delta;
-        camera.position.addScaledVector(forward, -dz * distance);
-        camera.position.addScaledVector(right, dx * distance);
+        const moveForward = -dz * distance;
+        const moveRight = dx * distance;
+        moveWithCollisions(
+          forward.x * moveForward + right.x * moveRight,
+          forward.z * moveForward + right.z * moveRight,
+        );
         camera.position.y = eyeHeightRef.current;
         clampToFootprint();
         syncAvatar();
