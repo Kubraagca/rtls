@@ -32,6 +32,13 @@ const FULL_ANIMATION_STEP_SECONDS = 1 / 24;
 const PROXY_REFRESH_SECONDS = 1 / 20;
 const SNAPSHOT_REFRESH_SECONDS = 0.5;
 const PERFORMANCE_REFRESH_SECONDS = 1;
+const AVATAR_REPATH_DELAY_SECONDS = 0.02;
+// Collision is intentionally center-point based. The user should be able to
+// use any open gap between objects; only entering an object's actual bounds is
+// blocked. A tiny epsilon avoids numerical tunnelling through exact corners.
+const AVATAR_COLLISION_RADIUS = 0.035;
+const AVATAR_AVOIDANCE_RADIUS = 0.18;
+const AVATAR_STUCK_IDLE_DELAY_SECONDS = 3;
 
 interface RtlsStation {
   x: number;
@@ -75,6 +82,16 @@ interface NpcState {
   visibleInFrustum: boolean;
   cameraDistance: number;
   avatarVariant: AvatarVariant;
+  blockedFor: number;
+  navigationPath: Array<{ x: number; z: number }>;
+}
+
+interface AvatarObstacle {
+  x: number;
+  z: number;
+  halfWidth: number;
+  halfDepth: number;
+  rotation: number;
 }
 
 interface FullAvatarSlot {
@@ -211,6 +228,7 @@ export function useNpcs(options: UseNpcsOptions): void {
 
     const personItems = getRtlsPersonItems(items);
     const stations = buildRtlsStations(items, halfW, halfD);
+    const obstacles = buildAvatarObstacles(items);
     const npcs: NpcState[] = personItems.map((item, index) =>
       createNpc(THREE, halfW, halfD, floorY, index, stations, item)
     );
@@ -315,7 +333,7 @@ export function useNpcs(options: UseNpcsOptions): void {
 
       let changed = false;
       if (!pausedRef.current) {
-        changed = stepSimulation(npcs, delta, now, halfW, halfD, floorY, stations);
+        changed = stepSimulation(npcs, delta, now, halfW, halfD, floorY, stations, obstacles);
       }
 
       if (lodAccumulator >= LOD_REFRESH_SECONDS) {
@@ -392,34 +410,30 @@ export function useNpcs(options: UseNpcsOptions): void {
 }
 
 function buildRtlsStations(items: readonly FurnitureItem[], halfW: number, halfD: number): RtlsStation[] {
-  // Prefer explicitly placed office chairs. A desk-derived offset is only an
-  // approximation and becomes visibly wrong as soon as the chair is moved or
-  // the desk is rotated independently.
-  const chairs = items.filter(
-    (item) => item.position && (item.type === 'office-chair' || item.type === 'conference-chair')
-  );
-  if (chairs.length > 0) {
-    return chairs.map((chair) => {
-      const yaw = chair.rotation ?? 0;
+  // Sitting targets must be real seats. A workstation by itself is not a
+  // chair, so never derive a sitting target from the desk's approximate
+  // offset; that was causing avatars to sit in empty spaces.
+  const seats = items.filter((item) => item.position && isAvatarSeat(item.type));
+  return seats.map((seat) => {
+      const yaw = seat.rotation ?? 0;
       return {
-        x: clamp(chair.position!.x, -halfW, halfW),
-        z: clamp(chair.position!.z, -halfD, halfD),
+        x: clamp(seat.position!.x, -halfW, halfW),
+        z: clamp(seat.position!.z, -halfD, halfD),
         // The chair back is modelled on local -Z, so the person faces local +Z.
         faceYaw: normalizeAngle(yaw),
       };
     });
-  }
+}
 
-  const stations: RtlsStation[] = [];
-  for (const item of items) {
-    if (!item.position || item.type !== 'workstation') continue;
-    const yaw = item.rotation ?? 0;
-    const chairOffset = item.depth / 2 + 0.64;
-    const x = clamp(item.position.x + Math.sin(yaw) * chairOffset, -halfW, halfW);
-    const z = clamp(item.position.z + Math.cos(yaw) * chairOffset, -halfD, halfD);
-    stations.push({ x, z, faceYaw: normalizeAngle(yaw + Math.PI) });
-  }
-  return stations;
+function isAvatarSeat(type: string): boolean {
+  return type === 'office-chair'
+    || type === 'conference-chair'
+    || type === 'chair'
+    || type === 'dining-chair'
+    || type === 'armchair'
+    || type === 'sofa'
+    || type === 'gltf-chair'
+    || type === 'gltf-sofa';
 }
 
 function createNpc(
@@ -467,6 +481,8 @@ function createNpc(
     visibleInFrustum: false,
     cameraDistance: Number.POSITIVE_INFINITY,
     avatarVariant: sourceItem.type === 'female-office-avatar' ? 'female' : 'male',
+    blockedFor: 0,
+    navigationPath: [],
   };
 }
 
@@ -490,7 +506,8 @@ function stepSimulation(
   halfW: number,
   halfD: number,
   floorY: number,
-  stations: readonly RtlsStation[]
+  stations: readonly RtlsStation[],
+  obstacles: readonly AvatarObstacle[]
 ): boolean {
   let changed = false;
   for (const npc of npcs) {
@@ -502,6 +519,18 @@ function stepSimulation(
         npc.position.x = npc.target.x;
         npc.position.z = npc.target.z;
         npc.group.position.set(npc.position.x, floorY, npc.position.z);
+
+        // A blocked direct route can be replaced with obstacle-corner
+        // waypoints. Consume those waypoints before changing the RTLS state,
+        // so a desk does not trap the avatar at its nearest corner.
+        if (npc.navigationPath.length > 0) {
+          const nextWaypoint = npc.navigationPath.shift()!;
+          npc.target = nextWaypoint;
+          npc.blockedFor = 0;
+          changed = true;
+          continue;
+        }
+
         if (npc.targetFaceYaw !== undefined) npc.yaw = npc.targetFaceYaw;
         if (npc.targetKind === 'desk') {
           setMode(npc, 'working', now);
@@ -515,9 +544,90 @@ function stepSimulation(
       }
 
       const step = Math.min(distance, npc.speed * delta);
-      npc.position.x = clamp(npc.position.x + (dx / distance) * step, -halfW, halfW);
-      npc.position.z = clamp(npc.position.z + (dz / distance) * step, -halfD, halfD);
-      npc.yaw = Math.atan2(dx, dz);
+      const previousX = npc.position.x;
+      const previousZ = npc.position.z;
+      const nextX = clamp(npc.position.x + (dx / distance) * step, -halfW, halfW);
+      const nextZ = clamp(npc.position.z + (dz / distance) * step, -halfD, halfD);
+      const blockingAvatar = findBlockingAvatar(npc, nextX, nextZ, npcs);
+      if (blockingAvatar) {
+        // Deterministic passing side: the lower indexed avatar keeps its
+        // preferred side and the other one steps around it. This prevents two
+        // agents from repeatedly choosing the same escape direction.
+        const side = npc.index < blockingAvatar.index ? 1 : -1;
+        const sideX = clamp(npc.position.x - (dz / distance) * side * step, -halfW, halfW);
+        const sideZ = clamp(npc.position.z + (dx / distance) * side * step, -halfD, halfD);
+        if (!avatarPositionBlocked(sideX, sideZ, obstacles)
+          && !findBlockingAvatar(npc, sideX, sideZ, npcs)) {
+          npc.position.x = sideX;
+          npc.position.z = sideZ;
+        }
+      } else {
+        const movedX = !avatarPositionBlocked(nextX, npc.position.z, obstacles);
+        const movedZ = !avatarPositionBlocked(npc.position.x, nextZ, obstacles);
+        if (movedX) npc.position.x = nextX;
+        if (movedZ) npc.position.z = nextZ;
+      }
+      const actualMove = Math.hypot(npc.position.x - previousX, npc.position.z - previousZ);
+      if (actualMove < 0.0001) {
+        npc.blockedFor += delta;
+        if (npc.blockedFor >= AVATAR_STUCK_IDLE_DELAY_SECONDS) {
+          // Do not loop a walking animation forever against an unreachable
+          // obstacle. Briefly rest, then the idle branch selects a fresh
+          // target and returns the avatar to walking mode.
+          setMode(npc, 'idle', now);
+          npc.modeUntil = now + 900;
+          npc.navigationPath = [];
+          npc.blockedFor = 0;
+          npc.group.position.set(npc.position.x, floorY, npc.position.z);
+          changed = true;
+          continue;
+        }
+        if (npc.blockedFor > AVATAR_REPATH_DELAY_SECONDS) {
+          const route = buildAvatarRoute(
+            { x: npc.position.x, z: npc.position.z },
+            npc.target,
+            obstacles,
+            halfW,
+            halfD
+          );
+          if (route.length > 1) {
+            npc.navigationPath = route.slice(1);
+            npc.target = npc.navigationPath.shift()!;
+          } else {
+            const next = pickTarget(npc.index + 1, stations, halfW, halfD, false);
+            npc.target = { x: next.x, z: next.z };
+            npc.targetKind = next.kind;
+            npc.targetFaceYaw = next.faceYaw;
+          }
+          npc.blockedFor = 0;
+        }
+      } else {
+        npc.blockedFor = 0;
+      }
+      const movedDx = npc.position.x - previousX;
+      const movedDz = npc.position.z - previousZ;
+      const remainingDistance = Math.hypot(
+        npc.target.x - npc.position.x,
+        npc.target.z - npc.position.z
+      );
+      const madeTargetProgress = distance - remainingDistance > 0.001;
+      if (!madeTargetProgress && actualMove > 0.0001) {
+        npc.blockedFor += delta;
+        if (npc.blockedFor >= AVATAR_STUCK_IDLE_DELAY_SECONDS) {
+          setMode(npc, 'idle', now);
+          npc.modeUntil = now + 900;
+          npc.navigationPath = [];
+          npc.blockedFor = 0;
+          npc.group.position.set(npc.position.x, floorY, npc.position.z);
+          changed = true;
+          continue;
+        }
+      } else if (actualMove > 0.0001) {
+        npc.blockedFor = 0;
+      }
+      if (Math.hypot(movedDx, movedDz) > 0.0001) {
+        npc.yaw = Math.atan2(movedDx, movedDz);
+      }
       npc.group.position.set(npc.position.x, floorY, npc.position.z);
       npc.group.rotation.y = npc.yaw;
       npc.phase += delta * (7.0 + npc.speed);
@@ -676,6 +786,151 @@ function createFullAvatarSlot(
     shadowEnabled: false,
     avatarVariant,
   };
+}
+
+function buildAvatarObstacles(items: readonly FurnitureItem[]): AvatarObstacle[] {
+  return items
+    .filter((item) => item.position && !isNonBlockingAvatarItem(item.type))
+    .map((item) => ({
+      x: item.position!.x,
+      z: item.position!.z,
+      halfWidth: Math.max(0.08, item.width / 2),
+      halfDepth: Math.max(0.08, item.depth / 2),
+      rotation: item.rotation ?? 0,
+    }));
+}
+
+function isNonBlockingAvatarItem(type: string): boolean {
+  return type === 'office-avatar'
+    || type === 'female-office-avatar'
+    || type === 'custom-glb'
+    || type === 'door'
+    || type === 'window'
+    || type === 'rtls-gateway'
+    || type === 'rtls-beacon'
+    || type === 'wifi'
+    || type === 'security-camera'
+    || isAvatarSeat(type);
+}
+
+function avatarPositionBlocked(x: number, z: number, obstacles: readonly AvatarObstacle[]): boolean {
+  for (const obstacle of obstacles) {
+    const cos = Math.cos(obstacle.rotation);
+    const sin = Math.sin(obstacle.rotation);
+    const localX = (x - obstacle.x) * cos + (z - obstacle.z) * sin;
+    const localZ = -(x - obstacle.x) * sin + (z - obstacle.z) * cos;
+    const closestX = clamp(localX, -obstacle.halfWidth, obstacle.halfWidth);
+    const closestZ = clamp(localZ, -obstacle.halfDepth, obstacle.halfDepth);
+    const dx = localX - closestX;
+    const dz = localZ - closestZ;
+    if (dx * dx + dz * dz < AVATAR_COLLISION_RADIUS * AVATAR_COLLISION_RADIUS) return true;
+  }
+  return false;
+}
+
+function findBlockingAvatar(
+  npc: NpcState,
+  x: number,
+  z: number,
+  npcs: readonly NpcState[]
+): NpcState | undefined {
+  return npcs.find((other) => {
+    if (other === npc) return false;
+    return Math.hypot(x - other.position.x, z - other.position.z) < AVATAR_AVOIDANCE_RADIUS;
+  });
+}
+
+function buildAvatarRoute(
+  start: { x: number; z: number },
+  target: { x: number; z: number },
+  obstacles: readonly AvatarObstacle[],
+  halfW: number,
+  halfD: number
+): Array<{ x: number; z: number }> {
+  const margin = AVATAR_COLLISION_RADIUS + 0.035;
+  const nodes: Array<{ x: number; z: number }> = [start, target];
+  // Only objects intersecting the current start-to-target corridor can affect
+  // this detour. Including every scene item made route searches unnecessarily
+  // expensive in furnished rooms and could make an otherwise clear avatar
+  // appear to move slowly.
+  const relevantObstacles = obstacles.filter((obstacle) =>
+    !isAvatarSegmentClear(start, target, [obstacle])
+  );
+
+  for (const obstacle of relevantObstacles) {
+    const halfWidth = obstacle.halfWidth + margin;
+    const halfDepth = obstacle.halfDepth + margin;
+    const cos = Math.cos(obstacle.rotation);
+    const sin = Math.sin(obstacle.rotation);
+    for (const corner of [
+      [-halfWidth, -halfDepth], [halfWidth, -halfDepth],
+      [halfWidth, halfDepth], [-halfWidth, halfDepth],
+    ]) {
+      const localX = corner[0]!;
+      const localZ = corner[1]!;
+      const x = obstacle.x + localX * cos - localZ * sin;
+      const z = obstacle.z + localX * sin + localZ * cos;
+      if (x > -halfW && x < halfW && z > -halfD && z < halfD
+        && !avatarPositionBlocked(x, z, relevantObstacles)) {
+        nodes.push({ x, z });
+      }
+    }
+  }
+
+  const distances = new Array<number>(nodes.length).fill(Number.POSITIVE_INFINITY);
+  const previous = new Array<number>(nodes.length).fill(-1);
+  const visited = new Set<number>();
+  distances[0] = 0;
+
+  for (let iteration = 0; iteration < nodes.length; iteration += 1) {
+    let current = -1;
+    let best = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < nodes.length; index += 1) {
+      if (!visited.has(index) && distances[index]! < best) {
+        current = index;
+        best = distances[index]!;
+      }
+    }
+    if (current < 0) break;
+    visited.add(current);
+    if (current === 1) break;
+
+    for (let next = 0; next < nodes.length; next += 1) {
+      if (visited.has(next) || !isAvatarSegmentClear(nodes[current]!, nodes[next]!, relevantObstacles)) continue;
+      const dx = nodes[current]!.x - nodes[next]!.x;
+      const dz = nodes[current]!.z - nodes[next]!.z;
+      const distance = Math.hypot(dx, dz);
+      const candidate = distances[current]! + distance;
+      if (candidate < distances[next]!) {
+        distances[next] = candidate;
+        previous[next] = current;
+      }
+    }
+  }
+
+  if (!Number.isFinite(distances[1])) return [];
+  const route: Array<{ x: number; z: number }> = [];
+  for (let current = 1; current >= 0; current = previous[current]!) {
+    route.push(nodes[current]!);
+    if (current === 0) break;
+  }
+  return route.reverse();
+}
+
+function isAvatarSegmentClear(
+  start: { x: number; z: number },
+  end: { x: number; z: number },
+  obstacles: readonly AvatarObstacle[]
+): boolean {
+  const distance = Math.hypot(end.x - start.x, end.z - start.z);
+  const samples = Math.max(2, Math.ceil(distance / 0.12));
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    const x = start.x + (end.x - start.x) * t;
+    const z = start.z + (end.z - start.z) * t;
+    if (avatarPositionBlocked(x, z, obstacles)) return false;
+  }
+  return true;
 }
 
 function updateLodAssignments(
