@@ -1,4 +1,5 @@
 import { type BuilderContext, material, mesh } from '../builder-utils';
+import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import type * as ThreeNS from 'three';
 
 export function buildRug({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
@@ -67,18 +68,20 @@ export function buildVase({ THREE, item, hasCollision, baseColor, opacity }: Bui
 export function buildMirror({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
   const frameMat = material(THREE, baseColor, hasCollision, opacity, { roughness: 0.5 });
-  const reflectMat = material(THREE, 0xb3e5fc, hasCollision, opacity, { roughness: 0.05, metalness: 0.95 });
 
   const frame = mesh(THREE, new THREE.BoxGeometry(item.width, item.height, item.depth), frameMat);
   frame.position.y = item.height / 2 + 0.4;
   group.add(frame);
 
-  const surface = mesh(
-    THREE,
-    new THREE.BoxGeometry(item.width * 0.9, item.height * 0.9, item.depth * 0.4),
-    reflectMat
-  );
-  surface.position.set(0, item.height / 2 + 0.4, item.depth * 0.31);
+  const surface = new Reflector(new THREE.PlaneGeometry(item.width * 0.9, item.height * 0.9), {
+    color: 0xeeeeee, textureWidth: 512, textureHeight: 512, clipBias: 0.003,
+  });
+  // The player's body is excluded from the eye camera, but visible in mirrors.
+  surface.camera.layers.enable(1);
+  if (!Array.isArray(surface.material)) {
+    surface.material.addEventListener('dispose', () => surface.getRenderTarget().dispose());
+  }
+  surface.position.set(0, item.height / 2 + 0.4, item.depth / 2 + 0.005);
   group.add(surface);
   return group;
 }

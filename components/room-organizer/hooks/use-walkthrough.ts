@@ -11,11 +11,17 @@ export interface UseWalkthroughOptions {
   threeModuleRef: React.MutableRefObject<ThreeModule | null>;
   cameraRef: React.MutableRefObject<ThreeNS.PerspectiveCamera | null>;
   orbitRef: React.MutableRefObject<OrbitControlsType | null>;
+  sceneRef: React.MutableRefObject<ThreeNS.Scene | null>;
   eyeHeight?: number;
   walkSpeed?: number;
   /** Room footprint (metres) used to clamp the walker inside the walls. */
   roomWidth?: number;
   roomDepth?: number;
+  /** Optional avatar position to use as the first-person starting point. */
+  startPosition?: { x: number; z: number };
+  avatarId?: string;
+  startRotation?: number;
+  onAvatarExit?: (id: string, position: { x: number; z: number }, rotation: number) => void;
   /** Request a render on the next animation frame (render-on-demand). */
   invalidate?: () => void;
   /**
@@ -66,10 +72,15 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
     threeModuleRef,
     cameraRef,
     orbitRef,
+    sceneRef,
     eyeHeight = 1.6,
     walkSpeed = 3.0,
     roomWidth = Infinity,
     roomDepth = Infinity,
+    startPosition,
+    avatarId,
+    startRotation = 0,
+    onAvatarExit,
     invalidate,
     onExit,
   } = options;
@@ -82,6 +93,8 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
   const roomDepthRef = useRef(roomDepth);
   const invalidateRef = useRef(invalidate);
   const onExitRef = useRef(onExit);
+  const onAvatarExitRef = useRef(onAvatarExit);
+  onAvatarExitRef.current = onAvatarExit;
   eyeHeightRef.current = eyeHeight;
   walkSpeedRef.current = walkSpeed;
   roomWidthRef.current = roomWidth;
@@ -101,7 +114,7 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
   }, [enabled, eyeHeight, cameraRef]);
 
   useEffect(() => {
-    if (!enabled) return undefined;
+    if (!enabled || !avatarId || !startPosition) return undefined;
 
     const canvas = canvasRef.current;
     const THREE = threeModuleRef.current;
@@ -116,10 +129,33 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
     let cancelled = false;
     let controls: PointerLockControlsType | null = null;
     let savedCameraPosition: ThreeNS.Vector3 | null = null;
+    let avatarGroup: ThreeNS.Object3D | null = null;
+    const originalLayers = new Map<ThreeNS.Object3D, number>();
+    const savedQuaternion = camera.quaternion.clone();
+    const facing = new THREE.Vector3();
     let rafId = 0;
 
+    const syncAvatar = (): void => {
+      if (!avatarId) return;
+      if (!avatarGroup?.parent) {
+        avatarGroup = null;
+        sceneRef.current?.traverse((node) => {
+          if (!avatarGroup && node.userData.id === avatarId) avatarGroup = node;
+        });
+      }
+      if (!avatarGroup) return;
+      avatarGroup.position.x = camera.position.x;
+      avatarGroup.position.z = camera.position.z;
+      camera.getWorldDirection(facing);
+      avatarGroup.rotation.y = Math.atan2(facing.x, facing.z);
+      avatarGroup.traverse((node) => {
+        if (!originalLayers.has(node)) originalLayers.set(node, node.layers.mask);
+        node.layers.set(1);
+      });
+    };
+
     const onKeyDown = (event: KeyboardEvent) => {
-      if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
+      if (MOVEMENT_KEYS.has(event.code) && controls?.isLocked) { event.preventDefault(); pressed.add(event.code); }
     };
     const onKeyUp = (event: KeyboardEvent) => pressed.delete(event.code);
     // Escape exit: the browser reserves the first Escape to release pointer
@@ -153,10 +189,15 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
       if (cancelled) return;
 
       controls = new controlsModule.PointerLockControls(camera, canvas);
+      const clearKeys = () => pressed.clear();
+      controls.addEventListener('unlock', clearKeys);
+      window.addEventListener('blur', clearKeys);
+      cleanup.push(() => { controls?.removeEventListener('unlock', clearKeys); window.removeEventListener('blur', clearKeys); });
       savedCameraPosition = camera.position.clone();
-      camera.position.set(0, eyeHeightRef.current, 3);
-      camera.lookAt(0, eyeHeightRef.current, 0);
+      camera.position.set(startPosition?.x ?? 0, eyeHeightRef.current, startPosition?.z ?? 3);
+      camera.lookAt(camera.position.x + Math.sin(startRotation), eyeHeightRef.current, camera.position.z + Math.cos(startRotation));
       clampToFootprint();
+      syncAvatar();
 
       const requestLock = () => controls?.lock();
       canvas.addEventListener('click', requestLock);
@@ -167,7 +208,12 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
       cleanup.push(() => controls?.unlock());
       cleanup.push(() => controls?.disconnect());
       cleanup.push(() => {
+        originalLayers.forEach((mask, node) => { node.layers.mask = mask; });
+        if (avatarGroup) onAvatarExitRef.current?.(avatarId, { x: avatarGroup.position.x, z: avatarGroup.position.z }, avatarGroup.rotation.y);
+      });
+      cleanup.push(() => {
         if (savedCameraPosition) camera.position.copy(savedCameraPosition);
+        camera.quaternion.copy(savedQuaternion);
         invalidateRef.current?.();
       });
       // Paint the eye-level starting pose. The main RAF tick no longer calls
@@ -184,6 +230,7 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
         const delta = Math.min(0.05, (now - lastTime) / 1000);
         lastTime = now;
 
+        syncAvatar();
         if (!controls?.isLocked) return;
         // Walkthrough is an active mode: mouse-look mutates the camera outside
         // this loop, so render every frame while pointer lock is engaged.
@@ -214,6 +261,7 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
         camera.position.addScaledVector(right, dx * distance);
         camera.position.y = eyeHeightRef.current;
         clampToFootprint();
+        syncAvatar();
       };
       rafId = requestAnimationFrame(step);
       cleanup.push(() => cancelAnimationFrame(rafId));
@@ -230,5 +278,5 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
       }
       if (orbit) orbit.enabled = true;
     };
-  }, [enabled, canvasRef, threeModuleRef, cameraRef, orbitRef]);
+  }, [enabled, canvasRef, threeModuleRef, cameraRef, orbitRef, sceneRef, avatarId, startPosition, startRotation]);
 }

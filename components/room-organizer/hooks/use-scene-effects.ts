@@ -62,7 +62,7 @@ function exteriorOpeningAttachment(
   planCenterX: number;
   planCenterZ: number;
 } | null {
-  if ((item.type !== 'door' && item.type !== 'window') || !item.position) return null;
+  if ((item.type !== 'door' && item.type !== 'window' && item.type !== 'security-camera') || !item.position) return null;
   const boundaries: readonly InteriorWall[] = layout.boundaryWalls ?? [
     { id: 'north', x1: -layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: -layout.height / 2 },
     { id: 'east', x1: layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: layout.height / 2 },
@@ -583,6 +583,7 @@ export function useSceneEffects({
         group.rotation.y = item.rotation ?? 0;
         if (item.mirrored) group.scale.x = -1;
         group.userData.type = ROOM_OBJECT_TAGS.Furniture;
+        group.userData.itemType = item.type;
         group.userData.ceilingLight = item.type === 'ceiling-panel-light';
         group.userData.ceilingMounted = item.type === 'ceiling-panel-light'
           || item.type === 'pendant-light'

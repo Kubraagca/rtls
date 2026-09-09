@@ -677,7 +677,9 @@ function drawFurniture(
     ctx.translate(cx, cy);
     // Canvas rotate() is clockwise while Three's rotateY is CCW; negate so the
     // 2D footprint matches the 3D scene's orientation.
-    ctx.rotate(-(item.rotation ?? 0));
+    // Keep the floor plan orthogonal. Items may have fine-grained rotations
+    // in 3D, but diagonal symbols make a dense 2D plan hard to scan.
+    ctx.rotate(-snapPlanRotation(item.rotation ?? 0));
 
     if (options.selectedItemId === item.id) {
       ctx.strokeStyle = '#00ff00';
@@ -698,7 +700,7 @@ function drawFurniture(
     ctx.fillStyle = item.color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(item.icon, 0, 0);
+    ctx.fillText(planIcon(item), 0, 0);
     ctx.restore();
 
   }
@@ -720,6 +722,34 @@ function drawRoomDimensions(
   ctx.rotate(-Math.PI / 2);
   ctx.fillText(`${layout.height.toFixed(2)}m`, 0, 0);
   ctx.restore();
+}
+
+function planIcon(item: FurnitureItem): string {
+  const icon = item.icon?.trim();
+  // These legacy catalog glyphs render as unexplained boxes/lines in the
+  // plan. Keep authored emoji icons, but give geometric placeholders a
+  // recognizable type-based replacement.
+  if (icon && !/^[▤▥▧▦▰□◇◉🟫]+$/u.test(icon)) return icon;
+  const type = item.type.toLowerCase();
+  if (type.includes('chair') || type.includes('bench') || type.includes('seat')) return '🪑';
+  if (type.includes('table') || type.includes('desk') || type.includes('counter') || type.includes('workstation')) return '🪵';
+  if (type.includes('cabinet') || type.includes('locker') || type.includes('shelf') || type.includes('wardrobe') || type.includes('storage')) return '🗄️';
+  if (type.includes('lamp') || type.includes('light')) return '💡';
+  if (type.includes('plant') || type.includes('tree') || type.includes('bush') || type.includes('flower') || type.includes('vase')) return '🪴';
+  if (type.includes('screen') || type.includes('tv') || type.includes('monitor') || type.includes('computer')) return '🖥️';
+  if (type.includes('door')) return '🚪';
+  if (type.includes('window') || type.includes('partition') || type.includes('panel')) return '🪟';
+  if (type.includes('person') || type.includes('avatar') || type.includes('office-avatar')) return '🧍';
+  if (type.includes('trash') || type.includes('bin')) return '🗑️';
+  if (type.includes('printer')) return '🖨️';
+  if (type.includes('fridge')) return '🧊';
+  if (type.includes('coffee')) return '☕';
+  if (type.includes('water')) return '💧';
+  return icon || '•';
+}
+
+function snapPlanRotation(rotation: number): number {
+  return Math.round(rotation / (Math.PI / 2)) * (Math.PI / 2);
 }
 
 /**

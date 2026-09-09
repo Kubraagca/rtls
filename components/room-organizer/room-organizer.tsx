@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { Eye, Pencil } from 'lucide-react';
 import { FloorPlanEditor } from './canvas-2d/floor-plan-editor';
 import { worldPositionFrom2DClient } from './canvas-2d/render';
 import { RoomEditorProvider, type RoomEditorContextValue } from './contexts/room-editor-context';
@@ -141,6 +141,7 @@ export function RoomOrganizer(): JSX.Element {
   // has no PointerLockControls. This single signal gates walkthrough-aware
   // behaviour: canvas select/drag/hover, single-key shortcuts and the hook.
   const walkthroughActive = view.walkthroughMode && !view.view2D;
+  const [possessedAvatar, setPossessedAvatar] = useState<{ id: string; position: { x: number; z: number }; rotation: number; eyeHeight: number } | null>(null);
 
   const playCue = useCallback(
     (cue: SoundCue) => {
@@ -926,9 +927,14 @@ export function RoomOrganizer(): JSX.Element {
     threeModuleRef,
     cameraRef,
     orbitRef: controlsRef,
-    eyeHeight: activeFloorY + 1.6,
+    sceneRef,
+    eyeHeight: possessedAvatar?.eyeHeight ?? activeFloorY + 1.6,
     roomWidth: layout.width,
     roomDepth: layout.height,
+    startPosition: possessedAvatar?.position,
+    startRotation: possessedAvatar?.rotation,
+    avatarId: possessedAvatar?.id,
+    onAvatarExit: (id, position, rotation) => actions.updateItem(id, { position, rotation }),
     onExit: useCallback(() => {
       setView((v) => (v.walkthroughMode ? { ...v, walkthroughMode: false } : v));
       setGameMode((mode) => (mode === 'live' ? 'build' : mode));
@@ -1466,6 +1472,36 @@ export function RoomOrganizer(): JSX.Element {
         >
           {view.view2D ? '3D Görünüm' : '2D Plan'}
         </button>
+        {!view.view2D && <button
+          type="button"
+          className={`pc-glass pc-glass--dark pc-tile${view.walkthroughMode ? ' pc-tile--active' : ''}`}
+          disabled={!walkthroughActive && !(selectedItem?.position && (selectedItem.type === 'office-avatar' || selectedItem.type === 'female-office-avatar' || (selectedItem.type === 'custom-glb' && selectedItem.category === 'people')))}
+          onClick={() => {
+            if (walkthroughActive) {
+              setView((v) => ({ ...v, walkthroughMode: false }));
+              return;
+            }
+            if (!selectedItem?.position) return;
+            setPossessedAvatar({ id: selectedItem.id, position: { ...selectedItem.position }, rotation: selectedItem.rotation ?? 0, eyeHeight: activeFloorY + (selectedItem.elevation ?? 0) + selectedItem.height * 0.93 });
+            setView((v) => ({ ...v, walkthroughMode: true, drawWallMode: false }));
+          }}
+          aria-pressed={view.walkthroughMode}
+          title="Avatarın gözünden ofiste gez"
+          style={{
+            padding: '8px 12px',
+            borderRadius: 10,
+            fontFamily: 'var(--pc-font-display)',
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <Eye size={13} strokeWidth={2.2} />
+          {view.walkthroughMode ? 'GEZİNTİYİ BİTİR' : 'AVATAR GÖRÜŞÜ'}
+        </button>}
         {view.view2D && <button
           type="button"
           className={`hidden pc-glass pc-glass--dark pc-tile${view.drawWallMode ? ' pc-tile--active' : ''}`}
@@ -1543,7 +1579,7 @@ export function RoomOrganizer(): JSX.Element {
       )}
 
       {/* Selection popover lives on the right edge */}
-      {gameMode !== 'live' && selectedItem && (
+      {gameMode !== 'live' && !walkthroughActive && selectedItem && (
         <ItemContextPopover
           hasCollision={hasCollisions(
             selectedItem,
