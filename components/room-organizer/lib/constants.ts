@@ -21,6 +21,9 @@ export const MAX_ROOM_DIMENSION = 100;
 // (camera framing, collision math, shadow map) (#121).
 export const MAX_ITEM_DIMENSION = 50;
 
+/** Shared wall height used to seat the roof correctly. */
+export const ROOM_WALL_HEIGHT_METERS = 3;
+
 // Keep the orbit camera at a useful distance in 3D. These limits are specific
 // to the overview camera and do not affect avatar/camera field-of-view values.
 export const THREE_VIEW_MIN_DISTANCE = 1.5;

@@ -41,7 +41,7 @@ describe('layoutReducer — building properties', () => {
 });
 
 describe('layoutReducer — item CRUD', () => {
-  it('addCatalogItem adds an item to the active floor, locked, at given position', () => {
+  it('addCatalogItem adds an unlocked item to the active floor at given position', () => {
     const state = layoutReducer(stateWith([]), {
       type: 'addCatalogItem',
       catalogItem: makeCatalogItem(),
@@ -50,7 +50,7 @@ describe('layoutReducer — item CRUD', () => {
     });
     const items = activeItems(state);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ id: 'new-1', locked: true, rotation: 0, position: { x: 2, z: 3 } });
+    expect(items[0]).toMatchObject({ id: 'new-1', locked: false, rotation: 0, position: { x: 2, z: 3 } });
   });
 
   it('addCatalogItem defaults position to origin and adds sofaShape for sofas', () => {

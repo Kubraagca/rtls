@@ -171,10 +171,7 @@ export function useItemDrag({
         actions.bulkSetPositions(session.latest);
       }
       if (!moved || !session) return;
-      // Lock every dragged item after a real drag so it can't be accidentally
       // moved — previously only the primary was locked, so co-dragged items
-      // stayed silently movable (#115).
-      for (const movedId of session.latest.keys()) actions.setLocked(movedId, true);
       // On release, settle every wall-mounted item in the commit — doors and
       // windows re-snap their position AND wall-aligned rotation (a drag to a
       // different wall otherwise keeps the stale rotation, #62; a group drag

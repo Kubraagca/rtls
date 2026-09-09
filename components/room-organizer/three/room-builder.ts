@@ -2,6 +2,7 @@ import { removeAndDispose } from './builder-utils';
 import { buildFloorMaterial } from './floor-patterns';
 import { mergeHoleRects, openingsForWall, type FloorOpening, type WallOpening } from './wall-openings';
 import { buildWallMaterial } from './wall-patterns';
+import { ROOM_WALL_HEIGHT_METERS } from '../lib/constants';
 import type { FloorPattern, FloorPlanFitMode, InteriorWall, WallId, WallPattern } from '../lib/types';
 import type * as ThreeNS from 'three';
 
@@ -155,7 +156,6 @@ const DEFAULT_WALL_COLOR = 0xe8dcc4;
 // Keep the exterior shell identical to newly drawn interior segments. This is
 // intentionally shared in value with interior-walls.ts: every wall begins as
 // a 2.60 m high, 16 cm thick construction element.
-const DEFAULT_WALL_HEIGHT = 2.6;
 const DEFAULT_WALL_THICKNESS = 0.16;
 
 export function removeTagged(scene: ThreeNS.Scene, ...tags: RoomObjectTag[]): void {
@@ -493,7 +493,7 @@ function buildWalls(
   hiddenWalls?: readonly WallId[],
   boundaryWalls?: readonly InteriorWall[]
 ): void {
-  const wallHeight = DEFAULT_WALL_HEIGHT;
+  const wallHeight = ROOM_WALL_HEIGHT_METERS;
   const centerY = yOffset + wallHeight / 2;
 
   const boundaryCenter = boundaryWalls && boundaryWalls.length > 0

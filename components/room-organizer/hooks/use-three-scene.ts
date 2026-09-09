@@ -244,6 +244,57 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         controlsRef.current = null;
       });
 
+      // Hold Space to use the left mouse button for viewport panning.
+      let spacePanActive = false;
+      let spacePanPointerDown = false;
+      const setSpacePan = (active: boolean) => {
+        spacePanActive = active;
+        canvas.dataset.spacePan = active ? 'true' : 'false';
+        controls.mouseButtons.LEFT = active ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+        canvas.style.cursor = active ? (spacePanPointerDown ? 'grabbing' : 'grab') : '';
+      };
+      const onSpaceKeyDown = (event: KeyboardEvent) => {
+        if (event.code !== 'Space' || event.repeat) return;
+        const target = event.target as HTMLElement | null;
+        if (target?.matches('input, textarea, select, [contenteditable="true"]')) return;
+        event.preventDefault();
+        setSpacePan(true);
+      };
+      const onSpaceKeyUp = (event: KeyboardEvent) => {
+        if (event.code !== 'Space') return;
+        event.preventDefault();
+        spacePanPointerDown = false;
+        setSpacePan(false);
+      };
+      const onSpaceBlur = () => {
+        spacePanPointerDown = false;
+        setSpacePan(false);
+      };
+      const onPanPointerDown = (event: PointerEvent) => {
+        if (spacePanActive && event.button === 0) {
+          spacePanPointerDown = true;
+          canvas.style.cursor = 'grabbing';
+        }
+      };
+      const onPanPointerUp = () => {
+        if (!spacePanActive) return;
+        spacePanPointerDown = false;
+        canvas.style.cursor = 'grab';
+      };
+      window.addEventListener('keydown', onSpaceKeyDown);
+      window.addEventListener('keyup', onSpaceKeyUp);
+      window.addEventListener('blur', onSpaceBlur);
+      canvas.addEventListener('pointerdown', onPanPointerDown);
+      window.addEventListener('pointerup', onPanPointerUp);
+      cleanup.push(() => {
+        window.removeEventListener('keydown', onSpaceKeyDown);
+        window.removeEventListener('keyup', onSpaceKeyUp);
+        window.removeEventListener('blur', onSpaceBlur);
+        canvas.removeEventListener('pointerdown', onPanPointerDown);
+        window.removeEventListener('pointerup', onPanPointerUp);
+        delete canvas.dataset.spacePan;
+      });
+
       addLights(THREE, scene);
 
       // While the GPU context is lost the drawing buffer is gone; rendering

@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { addFloorPlanRepaintHandler, render2DTopDown } from '../canvas-2d/render';
 import { hasCollisions } from '../lib/geometry';
 import { scheduleAssetLoad } from '../lib/asset-load-queue';
+import { ROOM_WALL_HEIGHT_METERS } from '../lib/constants';
 import { isRtlsPersonItem } from '../lib/rtls-person-items';
 import { useCatalogRegistry } from '../lib/catalog-registry';
 import { FLOOR_HEIGHT_METERS } from '../lib/types';
@@ -247,16 +248,16 @@ function isInsidePlan(layout: RoomLayout, x: number, z: number): boolean {
 }
 
 function updateCeilingLightVisibility(
-  THREE: typeof import('three'),
   scene: import('three').Scene,
   camera: import('three').PerspectiveCamera,
   layout: RoomLayout,
 ): void {
-  const direction = new THREE.Vector3();
-  camera.getWorldDirection(direction);
   const inside = isInsidePlan(layout, camera.position.x, camera.position.z);
   const belowCeiling = camera.position.y < layout.floors.length * FLOOR_HEIGHT_METERS - 0.15;
-  const canSeeCeiling = inside && belowCeiling && direction.y > 0.28;
+  // Ceiling-mounted items should remain available while editing from inside
+  // the room; requiring a steep upward camera angle made them disappear even
+  // when the ceiling was clearly in view.
+  const canSeeCeiling = inside && belowCeiling;
   scene.traverse((node) => {
     if (node.userData.ceilingMounted !== true) return;
     node.visible = canSeeCeiling;
@@ -519,8 +520,7 @@ export function useSceneEffects({
       const minimumCameraY = activeFloorY + 1.75;
       if (camera.position.y < minimumCameraY) camera.position.y = minimumCameraY;
       applyWallDisplay(scene, camera.position.x, camera.position.z, view.wallDisplay, layout.width, layout.height);
-      const THREE = threeModuleRef.current;
-      if (THREE) updateCeilingLightVisibility(THREE, scene, camera, layout);
+      updateCeilingLightVisibility(scene, camera, layout);
       invalidate();
     };
     apply();
@@ -703,7 +703,7 @@ export function useSceneEffects({
       ((scene.userData[FURNITURE_REVISION_KEY] as number | undefined) ?? 0) + 1;
     if (cameraRef.current) {
       applyWallDisplay(scene, cameraRef.current.position.x, cameraRef.current.position.z, view.wallDisplay, layout.width, layout.height);
-      updateCeilingLightVisibility(THREE, scene, cameraRef.current, layout);
+      updateCeilingLightVisibility(scene, cameraRef.current, layout);
     }
     requestShadowUpdate();
     return () => {
@@ -1053,7 +1053,7 @@ export function useSceneEffects({
       scene,
       width: layout.width,
       depth: layout.height,
-      baseY: layout.floors.length * FLOOR_HEIGHT_METERS,
+      baseY: (layout.floors.length - 1) * FLOOR_HEIGHT_METERS + ROOM_WALL_HEIGHT_METERS,
       spec: layout.roof,
       boundaryWalls: exteriorBoundary,
       interiorWalls: activeFloor.interiorWalls,

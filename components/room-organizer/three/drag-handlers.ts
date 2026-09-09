@@ -143,6 +143,7 @@ export function attachDragHandlers({
   };
 
   const onPointerDown = (event: PointerEvent): void => {
+    if (canvas.dataset.spacePan === 'true') return;
     // In walkthrough mode the canvas click only engages pointer lock — it must
     // not select furniture, open a popover or start a drag (see #67).
     if (handlersRef.current.walkthroughActive) return;
@@ -242,6 +243,7 @@ export function attachDragHandlers({
   };
 
   const onPointerMove = (event: PointerEvent): void => {
+    if (canvas.dataset.spacePan === 'true') return;
     if (!dragTarget) {
       // Hover + tooltip is a mouse/pen affordance only. Skipping it for touch
       // avoids per-frame React re-renders while a finger drags.
