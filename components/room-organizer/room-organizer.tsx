@@ -173,6 +173,15 @@ export function RoomOrganizer(): JSX.Element {
   const [measurementPoints, setMeasurementPoints] = useState<ReadonlyArray<{ x: number; z: number }>>([]);
   const [wallDraft, setWallDraft] = useState<{ x: number; z: number } | null>(null);
   const [pointerWorld, setPointerWorld] = useState<{ x: number; z: number } | null>(null);
+  useEffect(() => {
+    if (!view.drawWallMode) return;
+    // Entering the drawing tool must never leave an old wall/item selected.
+    // Existing wall geometry is still used by snapWallEndpoint, but it is not
+    // an interactive selection target while the tool owns the pointer.
+    setSelectedWall(null);
+    setSelectedItemId(null);
+    setExtraSelectedIds(new Set());
+  }, [view.drawWallMode]);
   const wallDragRef = useRef<{
     id: string;
     mode: 'start' | 'end' | 'move' | 'exterior';
@@ -193,10 +202,14 @@ export function RoomOrganizer(): JSX.Element {
     if (!view.drawWallMode || !pointerWorld) return null;
     return snapWallEndpoint({
       point: pointerWorld,
-    existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
+      existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
       fromPoint: wallDraft,
       roomWidth: layout.width,
       roomDepth: layout.height,
+      // Generous visual/interaction snap makes joining a corner feel like a
+      // deliberate "click into place" instead of pixel hunting.
+      snapDistance: 0.65,
+      clampToRoom: false,
     });
   }, [view.drawWallMode, pointerWorld, activeFloor.interiorWalls, wallDraft, layout.width, layout.height]);
 
@@ -212,15 +225,29 @@ export function RoomOrganizer(): JSX.Element {
     return matches;
   }, [catalogQuery, activeFloor.items]);
 
+  // A user can attach a new closed room beyond the dimensions of the room
+  // created first. Keep furniture placement/collision bounds large enough for
+  // every wall endpoint, otherwise an item in that valid annex is incorrectly
+  // marked as outside and cannot be placed comfortably.
+  const placementFootprint = useMemo(() => {
+    let maxX = layout.width / 2;
+    let maxZ = layout.height / 2;
+    for (const wall of [...(layout.boundaryWalls ?? []), ...layout.floors.flatMap((floor) => floor.interiorWalls ?? [])]) {
+      maxX = Math.max(maxX, Math.abs(wall.x1), Math.abs(wall.x2));
+      maxZ = Math.max(maxZ, Math.abs(wall.z1), Math.abs(wall.z2));
+    }
+    return { width: maxX * 2, depth: maxZ * 2 };
+  }, [layout.width, layout.height, layout.boundaryWalls, layout.floors]);
+
   const collidingIds = useMemo(() => {
     const matches = new Set<string>();
     for (const item of activeFloor.items) {
-      if (hasCollisions(item, activeFloor.items, layout.width, layout.height)) {
+      if (hasCollisions(item, activeFloor.items, placementFootprint.width, placementFootprint.depth)) {
         matches.add(item.id);
       }
     }
     return matches;
-  }, [activeFloor.items, layout.width, layout.height]);
+  }, [activeFloor.items, placementFootprint]);
 
   const handleEmptyClick = useCallback(
     (x: number, z: number, chainWall = true, snap = true, clampToRoom = snap) => {
@@ -233,7 +260,7 @@ export function RoomOrganizer(): JSX.Element {
           roomDepth: layout.height,
           // 2D clicks should land exactly where the cursor is. The 3D
           // workflow keeps vertex/right-angle snapping for room outlines.
-          snapDistance: snap ? undefined : 0,
+          snapDistance: snap ? 0.65 : 0,
           clampToRoom,
         });
         if (!wallDraft) {
@@ -371,7 +398,13 @@ export function RoomOrganizer(): JSX.Element {
     // press fall through to the wall move/resize hit testing below.
     if (view.drawWallMode) {
       wallDragRef.current = null;
-      handleEmptyClick(point.x, point.z, false, false, false);
+      setSelectedWall(null);
+      setSelectedItemId(null);
+      setExtraSelectedIds(new Set());
+      // Drawing clicks must use the same vertex snap as the preview. Keep
+      // outside points allowed so a wall can start/end on a free boundary
+      // vertex instead of being clamped back into the old rectangle.
+      handleEmptyClick(point.x, point.z, true, true, false);
       return;
     }
     const rect = canvas.getBoundingClientRect();
@@ -611,8 +644,8 @@ export function RoomOrganizer(): JSX.Element {
   const { sceneBoxRef, invalidateBoxRef, handleDragStart, handleDrag, handleDragEnd } = useItemDrag({
     activeFloor,
     activeFloorIndex,
-    roomWidth: layout.width,
-    roomDepth: layout.height,
+    roomWidth: placementFootprint.width,
+    roomDepth: placementFootprint.depth,
     actions,
     allSelectedIds,
   });
@@ -809,8 +842,8 @@ export function RoomOrganizer(): JSX.Element {
   const { snapPosition, getDragPlaneY, placeCatalogItem } = useItemPlacement({
     activeFloor,
     activeFloorY,
-    roomWidth: layout.width,
-    roomDepth: layout.height,
+    roomWidth: placementFootprint.width,
+    roomDepth: placementFootprint.depth,
     actions,
     view,
   });
@@ -1297,7 +1330,10 @@ export function RoomOrganizer(): JSX.Element {
           selectOnly(newId);
         }}
         twoDPlanEditor={
-          view.view2D ? (
+          // Match BAI's floorplanner model: DRAW owns one canvas-level
+          // controller. Do not mount SVG wall/item hit targets at all while
+          // drawing, so an existing wall can never win the click.
+          view.view2D && !view.drawWallMode ? (
             <FloorPlanEditor
               layout={layout}
               floor={activeFloor}
@@ -1333,6 +1369,7 @@ export function RoomOrganizer(): JSX.Element {
                 setPointerWorld(point);
               }}
               onPointerDown={handle2DWallMouseDown}
+              onPointerUp={handle2DWallMouseUp}
             />
           ) : null
         }
@@ -1511,8 +1548,8 @@ export function RoomOrganizer(): JSX.Element {
           hasCollision={hasCollisions(
             selectedItem,
             activeFloor.items,
-            layout.width,
-            layout.height
+            placementFootprint.width,
+            placementFootprint.depth
           )}
           onRotate={(id: string) => {
             rotateItemHandler(id);

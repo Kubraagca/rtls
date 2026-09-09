@@ -75,12 +75,12 @@ export function snapWallEndpoint({
   for (const vertex of vertices) {
     // Don't snap to a stale endpoint outside the lot — that would defeat
     // the clamp and re-poison new walls.
-    if (
+    if (clampToRoom && (
       vertex.x < -halfW - 0.001 ||
       vertex.x > halfW + 0.001 ||
       vertex.z < -halfD - 0.001 ||
       vertex.z > halfD + 0.001
-    ) {
+    )) {
       continue;
     }
     const distance = Math.hypot(vertex.x - clamped.x, vertex.z - clamped.z);

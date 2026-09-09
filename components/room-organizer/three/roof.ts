@@ -1,7 +1,8 @@
 import { removeAndDispose } from './builder-utils';
+import { findClosedFloorLoops } from './room-floor-zones';
 import { DisposableLruCache } from './texture-lru';
 import { getMaxAnisotropy } from './texture-settings';
-import type { RoofSpec, RoofStyle } from '../lib/types';
+import type { InteriorWall, RoofSpec, RoofStyle } from '../lib/types';
 import type * as ThreeNS from 'three';
 
 type ThreeModule = typeof import('three');
@@ -36,6 +37,10 @@ export interface BuildRoofOptions {
   /** Y-position of the roof base (top of the highest floor). */
   baseY: number;
   spec: RoofSpec;
+  /** Freeform exterior shell. When present, the roof follows this outline. */
+  boundaryWalls?: readonly InteriorWall[];
+  /** Internal segments can close an annex outside the original footprint. */
+  interiorWalls?: readonly InteriorWall[];
 }
 
 export function buildRoof(THREE: ThreeModule, options: BuildRoofOptions): void {
@@ -43,6 +48,14 @@ export function buildRoof(THREE: ThreeModule, options: BuildRoofOptions): void {
   if (options.spec.style === 'none') return;
 
   const color = options.spec.color ?? defaultRoofColor(options.spec.style);
+
+  // Rectangular gable/hip geometry cannot faithfully cover a trapezoid or an
+  // annex. For a freeform plan, use a solid polygon roof footprint instead of
+  // allowing a rectangular slab to hang outside (or miss) the walls.
+  if (options.boundaryWalls && options.boundaryWalls.length >= 3) {
+    options.scene.add(buildBoundaryRoof(THREE, options, color));
+    return;
+  }
 
   switch (options.spec.style) {
     case 'flat':
@@ -55,6 +68,87 @@ export function buildRoof(THREE: ThreeModule, options: BuildRoofOptions): void {
       options.scene.add(buildHippedRoof(THREE, options, color));
       break;
   }
+}
+
+function orderedBoundaryVertices(walls: readonly InteriorWall[]): Array<{ x: number; z: number }> {
+  const first = walls[0]!;
+  const vertices = [{ x: first.x1, z: first.z1 }, { x: first.x2, z: first.z2 }];
+  const remaining = walls.slice(1).map((wall) => ({ ...wall }));
+  while (remaining.length > 0) {
+    const current = vertices[vertices.length - 1]!;
+    const index = remaining.findIndex((wall) =>
+      Math.hypot(wall.x1 - current.x, wall.z1 - current.z) < 0.02 ||
+      Math.hypot(wall.x2 - current.x, wall.z2 - current.z) < 0.02
+    );
+    if (index < 0) break;
+    const next = remaining.splice(index, 1)[0]!;
+    vertices.push(
+      Math.hypot(next.x1 - current.x, next.z1 - current.z) < 0.02
+        ? { x: next.x2, z: next.z2 }
+        : { x: next.x1, z: next.z1 }
+    );
+  }
+  // A malformed/open sequence must not create a misleading partial roof.
+  return vertices.length >= 4 && Math.hypot(vertices[0]!.x - vertices[vertices.length - 1]!.x, vertices[0]!.z - vertices[vertices.length - 1]!.z) < 0.02
+    ? vertices.slice(0, -1)
+    : [];
+}
+
+function buildBoundaryRoof(
+  THREE: ThreeModule,
+  options: BuildRoofOptions,
+  color: string
+): ThreeNS.Object3D {
+  const { width, depth, baseY, boundaryWalls, interiorWalls } = options;
+  const vertices = orderedBoundaryVertices(boundaryWalls ?? []);
+  if (vertices.length < 3) return buildFlatRoof(THREE, options, color);
+
+  const group = new THREE.Group();
+  group.userData.type = ROOF_TAG;
+  group.add(buildRoofPolygon(THREE, vertices, width, depth, baseY, color));
+
+  // A freeform annex may be closed by a mix of original boundary walls and
+  // newly drawn interior segments. Add every smaller closed loop as a roof
+  // panel; the largest one is the base footprint already added above.
+  const loops = interiorWalls?.length
+    ? findClosedFloorLoops([...(boundaryWalls ?? []), ...interiorWalls])
+    : [];
+  const polygonArea = (points: readonly { x: number; z: number }[]) => points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length]!;
+    return sum + point.x * next.z - next.x * point.z;
+  }, 0) / 2;
+  const largest = loops.length > 0
+    ? loops.reduce((best, loop, index) => Math.abs(polygonArea(loop)) > Math.abs(polygonArea(loops[best]!)) ? index : best, 0)
+    : -1;
+  loops.forEach((loop, index) => {
+    if (index === largest || loop.length < 3) return;
+    group.add(buildRoofPolygon(THREE, loop, width, depth, baseY, color));
+  });
+  return group;
+}
+
+function buildRoofPolygon(
+  THREE: ThreeModule,
+  vertices: readonly { x: number; z: number }[],
+  width: number,
+  depth: number,
+  baseY: number,
+  color: string
+): ThreeNS.Mesh {
+  const shape = new THREE.Shape();
+  vertices.forEach((vertex, index) => {
+    if (index === 0) shape.moveTo(vertex.x, -vertex.z);
+    else shape.lineTo(vertex.x, -vertex.z);
+  });
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.20, bevelEnabled: false });
+  const mesh = new THREE.Mesh(geometry, buildShingleMaterial(THREE, color, width, depth));
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = baseY;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData.type = ROOF_TAG;
+  return mesh;
 }
 
 export function removeRoof(scene: ThreeNS.Scene): void {

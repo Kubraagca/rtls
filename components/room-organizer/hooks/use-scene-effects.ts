@@ -17,7 +17,7 @@ import {
   renderInteriorWalls,
   renderInteriorWallPreview,
 } from '../three/interior-walls';
-import { clearRoomFloorZones, renderRoomFloorZones } from '../three/room-floor-zones';
+import { clearRoomFloorZones, findClosedFloorLoops, renderRoomFloorZones } from '../three/room-floor-zones';
 import { clearItemLabels, renderItemLabels } from '../three/item-labels';
 import { applyTimeOfDay, isLightItemType } from '../three/lighting';
 import { clearMeasurement, renderMeasurement } from '../three/measurement';
@@ -28,7 +28,7 @@ import { ROOM_OBJECT_TAGS, applyWallDisplay, buildRoom, clearFloorPlanImageCache
 import { addSignalOverlays } from '../three/signal-overlay';
 import { computeFloorOpenings, computeWallOpenings } from '../three/wall-openings';
 import type { DigitalTwinLayerState } from '../lib/digital-twin-layers';
-import type { FloorLayout, RoomLayout, ViewSettings } from '../lib/types';
+import type { FloorLayout, FurnitureItem, InteriorWall, RoomLayout, ViewSettings } from '../lib/types';
 import type * as ThreeNS from 'three';
 
 const GLTF_ASSET_PATHS: Record<string, string> = {
@@ -46,6 +46,119 @@ const GLTF_ASSET_PATHS: Record<string, string> = {
   lamp: '/models/gltf-sample-assets/AnisotropyBarnLamp.glb',
   'floor-lamp': '/models/gltf-sample-assets/AnisotropyBarnLamp.glb',
 };
+
+function exteriorOpeningAttachment(
+  item: FurnitureItem,
+  layout: RoomLayout
+): {
+  centerX: number;
+  centerZ: number;
+  normalX: number;
+  normalZ: number;
+  planCenterX: number;
+  planCenterZ: number;
+} | null {
+  if ((item.type !== 'door' && item.type !== 'window') || !item.position) return null;
+  const boundaries: readonly InteriorWall[] = layout.boundaryWalls ?? [
+    { id: 'north', x1: -layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: -layout.height / 2 },
+    { id: 'east', x1: layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: layout.height / 2 },
+    { id: 'south', x1: layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: layout.height / 2 },
+    { id: 'west', x1: -layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: -layout.height / 2 },
+  ];
+  const centre = boundaries.reduce((sum, wall) => ({ x: sum.x + wall.x1, z: sum.z + wall.z1 }), { x: 0, z: 0 });
+  centre.x /= boundaries.length;
+  centre.z /= boundaries.length;
+  let closest: { wall: InteriorWall; distance: number; x: number; z: number } | null = null;
+  for (const wall of boundaries) {
+    const dx = wall.x2 - wall.x1;
+    const dz = wall.z2 - wall.z1;
+    const lengthSquared = dx * dx + dz * dz;
+    if (lengthSquared < 0.000001) continue;
+    const t = Math.max(0, Math.min(1, ((item.position.x - wall.x1) * dx + (item.position.z - wall.z1) * dz) / lengthSquared));
+    const x = wall.x1 + dx * t;
+    const z = wall.z1 + dz * t;
+    const distance = Math.hypot(item.position.x - x, item.position.z - z);
+    if (!closest || distance < closest.distance) closest = { wall, distance, x, z };
+  }
+  if (!closest || closest.distance > Math.max(0.45, item.depth * 2)) return null;
+  const dx = closest.wall.x2 - closest.wall.x1;
+  const dz = closest.wall.z2 - closest.wall.z1;
+  const length = Math.hypot(dx, dz);
+  let normalX = -dz / length;
+  let normalZ = dx / length;
+  if ((closest.x - centre.x) * normalX + (closest.z - centre.z) * normalZ < 0) {
+    normalX *= -1;
+    normalZ *= -1;
+  }
+  // The opening must follow the room-wide cutaway decision, just like its
+  // wall.  Using its own point on the segment would let a front door and the
+  // rest of that front-facing wall disagree at oblique camera angles.
+  return {
+    centerX: closest.x,
+    centerZ: closest.z,
+    normalX,
+    normalZ,
+    planCenterX: centre.x,
+    planCenterZ: centre.z,
+  };
+}
+
+type PlanPoint = { x: number; z: number };
+
+function polygonArea(points: readonly PlanPoint[]): number {
+  return points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length]!;
+    return sum + point.x * next.z - next.x * point.z;
+  }, 0) / 2;
+}
+
+/**
+ * The persisted boundary is the room that was created first. A later attached
+ * room is stored as drawn walls, so it must be folded into the exterior shell
+ * once those walls close a larger outline. This returns that outermost closed
+ * contour rather than blindly reusing the first room's rectangle.
+ */
+function outerBoundaryForFloor(layout: RoomLayout, floor: FloorLayout): InteriorWall[] {
+  const source = [...(layout.boundaryWalls ?? []), ...(floor.interiorWalls ?? [])];
+  const loops = findClosedFloorLoops(source);
+  if (loops.length === 0) return layout.boundaryWalls ?? [];
+  const outer = loops.reduce((largest, loop) =>
+    Math.abs(polygonArea(loop)) > Math.abs(polygonArea(largest)) ? loop : largest
+  );
+  return outer.map((point, index) => {
+    const next = outer[(index + 1) % outer.length]!;
+    return {
+      id: `outer-boundary-${index}`,
+      x1: point.x,
+      z1: point.z,
+      x2: next.x,
+      z2: next.z,
+    };
+  });
+}
+
+function pointOnWall(point: PlanPoint, wall: InteriorWall, tolerance = 0.2): boolean {
+  const dx = wall.x2 - wall.x1;
+  const dz = wall.z2 - wall.z1;
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared < 0.000001) return false;
+  const t = ((point.x - wall.x1) * dx + (point.z - wall.z1) * dz) / lengthSquared;
+  if (t < -0.02 || t > 1.02) return false;
+  const x = wall.x1 + dx * t;
+  const z = wall.z1 + dz * t;
+  return Math.hypot(point.x - x, point.z - z) <= tolerance;
+}
+
+/** Retain only walls that are not already represented by the exterior shell. */
+function interiorWallsForFloor(
+  layout: RoomLayout,
+  floor: FloorLayout,
+  exterior: readonly InteriorWall[]
+): InteriorWall[] {
+  return [...(layout.boundaryWalls ?? []), ...(floor.interiorWalls ?? [])].filter(
+    (wall) => !exterior.some((edge) => pointOnWall({ x: wall.x1, z: wall.z1 }, edge) && pointOnWall({ x: wall.x2, z: wall.z2 }, edge))
+  );
+}
 
 const gltfCache = new Map<string, Promise<ThreeNS.Object3D | null>>();
 
@@ -116,16 +229,33 @@ function ghostifyGroup(group: import('three').Object3D, opacity = 0.12): void {
   });
 }
 
+function isInsidePlan(layout: RoomLayout, x: number, z: number): boolean {
+  const walls = layout.boundaryWalls;
+  if (!walls?.length) return Math.abs(x) <= layout.width / 2 && Math.abs(z) <= layout.height / 2;
+  const points = walls.map((wall) => ({ x: wall.x1, z: wall.z1 }));
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i]!;
+    const b = points[j]!;
+    if ((a.z > z) !== (b.z > z) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 function updateCeilingLightVisibility(
-  _THREE: typeof import('three'),
+  THREE: typeof import('three'),
   scene: import('three').Scene,
-  _camera: import('three').PerspectiveCamera,
+  camera: import('three').PerspectiveCamera,
+  layout: RoomLayout,
 ): void {
+  const direction = new THREE.Vector3();
+  camera.getWorldDirection(direction);
+  const inside = isInsidePlan(layout, camera.position.x, camera.position.z);
+  const belowCeiling = camera.position.y < layout.floors.length * FLOOR_HEIGHT_METERS - 0.15;
+  const canSeeCeiling = inside && belowCeiling && direction.y > 0.28;
   scene.traverse((node) => {
-    if (node.userData.ceilingLight !== true) return;
-    // Ceiling panels remain visible in every camera angle and distance so
-    // users can always find and click the individual light directly.
-    node.visible = true;
+    if (node.userData.ceilingMounted !== true) return;
+    node.visible = canSeeCeiling;
   });
 }
 
@@ -243,6 +373,21 @@ export function useSceneEffects({
     [layout.floors]
   );
 
+  const boundaryWallsKey = useMemo(
+    () => JSON.stringify(layout.boundaryWalls ?? []),
+    [layout.boundaryWalls]
+  );
+
+  const placementFootprint = useMemo(() => {
+    let maxX = layout.width / 2;
+    let maxZ = layout.height / 2;
+    for (const wall of [...(layout.boundaryWalls ?? []), ...layout.floors.flatMap((floor) => floor.interiorWalls ?? [])]) {
+      maxX = Math.max(maxX, Math.abs(wall.x1), Math.abs(wall.x2));
+      maxZ = Math.max(maxZ, Math.abs(wall.z1), Math.abs(wall.z2));
+    }
+    return { width: maxX * 2, depth: maxZ * 2 };
+  }, [layout.width, layout.height, layout.boundaryWalls, layout.floors]);
+
   const lampsKey = useMemo(
     () =>
       JSON.stringify(
@@ -291,6 +436,7 @@ export function useSceneEffects({
 
     for (const { floor, index } of floorsToRender) {
       const isActive = index === activeFloorIndex;
+      const exteriorBoundary = outerBoundaryForFloor(layout, floor);
       const wallOpenings = computeWallOpenings(
         floor.items,
         layout.width,
@@ -311,7 +457,7 @@ export function useSceneEffects({
         wallColors: floor.wallColors,
         wallOpenings,
         hiddenWalls: floor.hiddenWalls,
-        boundaryWalls: layout.boundaryWalls,
+        boundaryWalls: exteriorBoundary,
         floorOpenings,
         floorPlanImage: index === 0 ? layout.floorPlanImage ?? null : null,
         floorPlanOpacity: layout.floorPlanOpacity ?? 0.5,
@@ -367,13 +513,13 @@ export function useSceneEffects({
       if (camera.position.y < minimumCameraY) camera.position.y = minimumCameraY;
       applyWallDisplay(scene, camera.position.x, camera.position.z, view.wallDisplay, layout.width, layout.height);
       const THREE = threeModuleRef.current;
-      if (THREE) updateCeilingLightVisibility(THREE, scene, camera);
+      if (THREE) updateCeilingLightVisibility(THREE, scene, camera, layout);
       invalidate();
     };
     apply();
     controls.addEventListener('change', apply);
     return () => controls.removeEventListener('change', apply);
-  }, [isReady, invalidate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, view.wallDisplay, layout.width, layout.height, activeFloorY]);
+  }, [isReady, invalidate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, view.wallDisplay, layout, activeFloorY]);
 
   // Furniture meshes
   useEffect(() => {
@@ -434,12 +580,26 @@ export function useSceneEffects({
         if (item.mirrored) group.scale.x = -1;
         group.userData.type = ROOM_OBJECT_TAGS.Furniture;
         group.userData.ceilingLight = item.type === 'ceiling-panel-light';
+        group.userData.ceilingMounted = item.type === 'ceiling-panel-light'
+          || item.type === 'pendant-light'
+          || item.type === 'rtls-gateway'
+          || item.type === 'rtls-beacon';
         group.userData.isLight = isLightItemType(item.type);
         group.userData.isCurtain = item.type === 'curtains';
         group.userData.floorY = floorY;
         group.userData.id = item.id;
         group.userData.floorIndex = index;
         group.userData.locked = item.locked === true || !isActive;
+        const exteriorOpening = exteriorOpeningAttachment(item, layout);
+        if (exteriorOpening) {
+          group.userData.exteriorOpening = true;
+          group.userData.exteriorCenterX = exteriorOpening.centerX;
+          group.userData.exteriorCenterZ = exteriorOpening.centerZ;
+          group.userData.exteriorNormalX = exteriorOpening.normalX;
+          group.userData.exteriorNormalZ = exteriorOpening.normalZ;
+          group.userData.exteriorPlanCenterX = exteriorOpening.planCenterX;
+          group.userData.exteriorPlanCenterZ = exteriorOpening.planCenterZ;
+        }
         // Inactive-floor groups are excluded from pointer raycasts entirely
         // (see drag-handlers' furnitureList, #122).
         group.userData.ghostFloor = !isActive;
@@ -530,7 +690,10 @@ export function useSceneEffects({
     // shadow map now that shadow casters were added/removed/moved.
     scene.userData[FURNITURE_REVISION_KEY] =
       ((scene.userData[FURNITURE_REVISION_KEY] as number | undefined) ?? 0) + 1;
-    if (cameraRef.current) updateCeilingLightVisibility(THREE, scene, cameraRef.current);
+    if (cameraRef.current) {
+      applyWallDisplay(scene, cameraRef.current.position.x, cameraRef.current.position.z, view.wallDisplay, layout.width, layout.height);
+      updateCeilingLightVisibility(THREE, scene, cameraRef.current, layout);
+    }
     requestShadowUpdate();
     return () => {
       disposed = true;
@@ -543,8 +706,8 @@ export function useSceneEffects({
     };
   }, [
     isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef,
-    layout.floors, layout.width, layout.height,
-    activeFloor, activeFloorIndex, view.showAllFloors, view.lightsEnabled, digitalTwinLiveMode, catalog,
+    layout.floors, layout.width, layout.height, layout.boundaryWalls,
+    activeFloor, activeFloorIndex, view.showAllFloors, view.lightsEnabled, view.wallDisplay, digitalTwinLiveMode, catalog,
   ]);
 
   // Selection / highlight outlines. Kept out of the furniture effect above so
@@ -714,7 +877,13 @@ export function useSceneEffects({
     // Trees/shrubs are shadow casters; the shadow map is static (autoUpdate off)
     // so it must be told the caster set changed.
     requestShadowUpdate();
-  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, view.showOutdoor, layout.width, layout.height]);
+  }, [
+    isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef,
+    view.showOutdoor, view.showAllFloors, view.view2D,
+    activeFloorIndex, interiorWallsKey, boundaryWallsKey, shellFinishesKey,
+    wallOpeningsKey, layout.width, layout.height,
+    layout.floorPlanImage, layout.floorPlanOpacity, layout.floorPlanFitMode,
+  ]);
 
   // Interior walls
   useEffect(() => {
@@ -731,21 +900,28 @@ export function useSceneEffects({
       : [{ floor: activeFloor, index: activeFloorIndex }];
 
     for (const { floor, index } of floorsToRender) {
-      const walls = floor.interiorWalls ?? [];
-      if (walls.length === 0) continue;
+      const exteriorBoundary = outerBoundaryForFloor(layout, floor);
+      const walls = interiorWallsForFloor(layout, floor, exteriorBoundary);
       const isActive = index === activeFloorIndex;
-      renderInteriorWalls(
-        THREE, scene, walls,
-        index * FLOOR_HEIGHT_METERS,
-      view.showAllFloors && !isActive ? 0.10 : undefined,
-        { openingCandidates: floor.items, roomWidth: layout.width, roomDepth: layout.height }
-      );
-      renderRoomFloorZones(THREE, scene, walls, index * FLOOR_HEIGHT_METERS, {
+      if (walls.length > 0) {
+        renderInteriorWalls(
+          THREE, scene, walls,
+          index * FLOOR_HEIGHT_METERS,
+          view.showAllFloors && !isActive ? 0.10 : undefined,
+          { openingCandidates: floor.items, roomWidth: layout.width, roomDepth: layout.height }
+        );
+      }
+      // A room may close against an exterior boundary as well as against
+      // interior walls. Treat both as one graph so a newly drawn triangle or
+      // annex immediately receives its own floor mesh.
+      const floorGraph = [...(layout.boundaryWalls ?? []), ...(floor.interiorWalls ?? [])];
+      renderRoomFloorZones(THREE, scene, floorGraph, index * FLOOR_HEIGHT_METERS, {
         floorColor: floor.floorColor,
         floorPattern: floor.floorPattern,
         roomWidth: layout.width,
         roomDepth: layout.height,
         ghostOpacity: view.showAllFloors && !isActive ? 0.10 : undefined,
+        skipLargestLoop: Boolean(layout.boundaryWalls?.length),
       });
     }
     // Interior walls cast shadows — recompute the static shadow map after any
@@ -755,7 +931,7 @@ export function useSceneEffects({
     // door/window opening candidates only; the two keys cover exactly that,
     // so a furniture edit doesn't re-extrude every interior wall.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, interiorWallsKey, wallOpeningsKey, activeFloorIndex, view.showAllFloors, view.view2D, layout.width, layout.height]);
+  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, interiorWallsKey, wallOpeningsKey, activeFloorIndex, view.showAllFloors, view.view2D, layout.width, layout.height, layout.boundaryWalls]);
 
   // Cyan outline on selected wall. Declared AFTER the shell + interior-wall
   // rebuild effects and keyed on the same rebuild keys, so it always snapshots
@@ -861,12 +1037,15 @@ export function useSceneEffects({
       return;
     }
 
+    const exteriorBoundary = outerBoundaryForFloor(layout, activeFloor);
     buildRoof(THREE, {
       scene,
       width: layout.width,
       depth: layout.height,
       baseY: layout.floors.length * FLOOR_HEIGHT_METERS,
       spec: layout.roof,
+      boundaryWalls: exteriorBoundary,
+      interiorWalls: activeFloor.interiorWalls,
     });
     // buildRoof adds meshes visible; only applyWallDisplay hides the roof in
     // cutaway/walls-down mode, and it otherwise runs on orbit — so a roof
@@ -876,7 +1055,7 @@ export function useSceneEffects({
       applyWallDisplay(scene, camera.position.x, camera.position.z, view.wallDisplay, layout.width, layout.height);
     }
     requestShadowUpdate();
-  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, cameraRef, layout.roof, layout.width, layout.height, layout.floors.length, activeFloorIndex, view.showAllFloors, view.wallDisplay]);
+  }, [isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, cameraRef, layout.roof, layout.width, layout.height, layout.boundaryWalls, activeFloor.interiorWalls, layout.floors.length, activeFloorIndex, view.showAllFloors, view.wallDisplay]);
 
   // 2D top-down view. The backing store is sized to the container's
   // clientWidth/clientHeight × devicePixelRatio (via a ResizeObserver) so the
@@ -906,9 +1085,12 @@ export function useSceneEffects({
         canvas,
         layout,
         floor: visibleActiveFloor,
-        selectedItemId,
-        selectedWallId: selectedWall?.id ?? null,
-        extraSelectedIds,
+        // The drawing tool is an isolated blank interaction surface. Keep the
+        // furniture/wall geometry visible underneath, but never paint an old
+        // selection while a new wall is being drawn.
+        selectedItemId: view.drawWallMode ? null : selectedItemId,
+        selectedWallId: view.drawWallMode ? null : selectedWall?.id ?? null,
+        extraSelectedIds: view.drawWallMode ? new Set<string>() : extraSelectedIds,
         showMeasurements: view.showMeasurements,
         showWiFiSignals: view.showWiFiSignals,
         showHeatmap: digitalTwinLayers?.heatmap ?? view.showHeatmap,
@@ -916,7 +1098,7 @@ export function useSceneEffects({
         showPaths: digitalTwinLayers?.paths ?? false,
         showDigitalTwinLabels: digitalTwinLayers?.labels ?? false,
         trackedDevices: digitalTwinLayers?.devices ? digitalTwinDevices : undefined,
-        hasCollision: (item) => hasCollisions(item, visibleActiveFloor.items, layout.width, layout.height),
+        hasCollision: (item) => hasCollisions(item, visibleActiveFloor.items, placementFootprint.width, placementFootprint.depth),
         zoom: planZoom,
         panX: planPanX,
         panY: planPanY,
@@ -924,7 +1106,7 @@ export function useSceneEffects({
         backgroundImage: view.backgroundImage,
         wallPreview:
           view.drawWallMode && wallDraft && pointerWorld
-            ? { start: wallDraft, end: pointerWorld }
+            ? { start: wallDraft, end: wallSnapResult?.point ?? pointerWorld }
             : null,
       });
     };
@@ -941,7 +1123,7 @@ export function useSceneEffects({
       window.removeEventListener('catalog-thumbnails-ready', paint);
       removeRepaintHandler();
     };
-  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, selectedItemId, selectedWall, extraSelectedIds, planZoom, planPanX, planPanY, wallDraft, pointerWorld]);
+  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, selectedItemId, selectedWall, extraSelectedIds, placementFootprint, planZoom, planPanX, planPanY, wallDraft, pointerWorld, wallSnapResult]);
 }
 
 export { measurementDistance } from '../three/measurement';

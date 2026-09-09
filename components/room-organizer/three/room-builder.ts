@@ -62,13 +62,63 @@ export function applyWallDisplay(
       obj.visible = mode !== 'down';
       continue;
     }
+    if (tag === ROOM_OBJECT_TAGS.Furniture && obj.userData.exteriorOpening === true) {
+      if (mode === 'down') {
+        obj.visible = false;
+      } else if (mode === 'up') {
+        obj.visible = true;
+      } else {
+        const nx = obj.userData.exteriorNormalX as number | undefined;
+        const nz = obj.userData.exteriorNormalZ as number | undefined;
+        const planX = obj.userData.exteriorPlanCenterX as number | undefined;
+        const planZ = obj.userData.exteriorPlanCenterZ as number | undefined;
+        obj.visible = [nx, nz, planX, planZ].every(Number.isFinite)
+          ? (cameraX - planX!) * nx! + (cameraZ - planZ!) * nz! < 0
+          : true;
+      }
+      continue;
+    }
     if (tag !== ROOM_OBJECT_TAGS.Wall) continue;
+
+    // Freeform boundary segments don't always have one of the four legacy
+    // north/east/south/west ids. They are still exterior walls, however, and
+    // must disappear alongside every other wall in walls-down mode.
+    if (mode === 'down' && obj.userData.exteriorWall === true) {
+      obj.visible = false;
+      continue;
+    }
+    // Cutaway is based on the camera's direction relative to the ROOM, not
+    // the distance to each individual segment. Therefore all wall pieces
+    // facing the same direction open/close together.
+    if (mode === 'cutaway' && obj.userData.exteriorWall === true) {
+      const nx = obj.userData.exteriorNormalX as number | undefined;
+      const nz = obj.userData.exteriorNormalZ as number | undefined;
+      const planX = obj.userData.exteriorPlanCenterX as number | undefined;
+      const planZ = obj.userData.exteriorPlanCenterZ as number | undefined;
+      if ([nx, nz, planX, planZ].every(Number.isFinite)) {
+        obj.visible = (cameraX - planX!) * nx! + (cameraZ - planZ!) * nz! < 0;
+        continue;
+      }
+    }
 
     // Id-less Wall-tagged helpers (the snap grid) stay visible in EVERY mode
     // — checking this after the mode branches made walls-down hide the floor
     // grid, which Sims-style walls-down is supposed to keep (#122).
     const wallId = obj.userData.wallId as WallId | undefined;
     if (!wallId) {
+      // Freeform boundary walls have generated ids rather than legacy compass
+      // ids. Their stored outward normal lets cutaway hide the wall facing the
+      // camera exactly like north/east/south/west walls.
+      if (mode === 'cutaway' && obj.userData.exteriorWall === true) {
+        const nx = obj.userData.exteriorNormalX as number | undefined;
+        const nz = obj.userData.exteriorNormalZ as number | undefined;
+        const planX = obj.userData.exteriorPlanCenterX as number | undefined;
+        const planZ = obj.userData.exteriorPlanCenterZ as number | undefined;
+        if ([nx, nz, planX, planZ].every(Number.isFinite)) {
+          obj.visible = (cameraX - planX!) * nx! + (cameraZ - planZ!) * nz! < 0;
+          continue;
+        }
+      }
       obj.visible = true;
       continue;
     }
@@ -102,6 +152,11 @@ export function applyWallDisplay(
 // Warm cream — build-mode build mode walls read as tan/cream by default, never
 // the neutral mid-grey we used to fall back to.
 const DEFAULT_WALL_COLOR = 0xe8dcc4;
+// Keep the exterior shell identical to newly drawn interior segments. This is
+// intentionally shared in value with interior-walls.ts: every wall begins as
+// a 2.60 m high, 16 cm thick construction element.
+const DEFAULT_WALL_HEIGHT = 2.6;
+const DEFAULT_WALL_THICKNESS = 0.16;
 
 export function removeTagged(scene: ThreeNS.Scene, ...tags: RoomObjectTag[]): void {
   const tagSet = new Set<string>(tags);
@@ -438,24 +493,48 @@ function buildWalls(
   hiddenWalls?: readonly WallId[],
   boundaryWalls?: readonly InteriorWall[]
 ): void {
-  const wallHeight = 3;
+  const wallHeight = DEFAULT_WALL_HEIGHT;
   const centerY = yOffset + wallHeight / 2;
 
+  const boundaryCenter = boundaryWalls && boundaryWalls.length > 0
+    ? boundaryWalls.reduce((sum, wall) => ({ x: sum.x + wall.x1, z: sum.z + wall.z1 }), { x: 0, z: 0 })
+    : { x: 0, z: 0 };
+  if (boundaryWalls?.length) {
+    boundaryCenter.x /= boundaryWalls.length;
+    boundaryCenter.z /= boundaryWalls.length;
+  }
   const wallSpecs: ReadonlyArray<{
     id: string;
     width: number;
     rotateY: number;
     position: [number, number, number];
-  }> = boundaryWalls && boundaryWalls.length >= 3 ? boundaryWalls.map((wall) => ({
-    id: wall.id,
-    width: Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1),
-    rotateY: Math.atan2(-(wall.z2 - wall.z1), wall.x2 - wall.x1),
-    position: [(wall.x1 + wall.x2) / 2, centerY, (wall.z1 + wall.z2) / 2] as [number, number, number],
-  })) : [
-    { id: 'north', width, rotateY: 0, position: [0, centerY, -depth / 2] },
-    { id: 'south', width, rotateY: Math.PI, position: [0, centerY, depth / 2] },
-    { id: 'west', width: depth, rotateY: Math.PI / 2, position: [-width / 2, centerY, 0] },
-    { id: 'east', width: depth, rotateY: -Math.PI / 2, position: [width / 2, centerY, 0] },
+    outwardNormal: readonly [number, number];
+    planCenter: readonly [number, number];
+  }> = boundaryWalls && boundaryWalls.length >= 3 ? boundaryWalls.map((wall) => {
+    const dx = wall.x2 - wall.x1;
+    const dz = wall.z2 - wall.z1;
+    const length = Math.hypot(dx, dz);
+    const midX = (wall.x1 + wall.x2) / 2;
+    const midZ = (wall.z1 + wall.z2) / 2;
+    let nx = -dz / length;
+    let nz = dx / length;
+    if ((midX - boundaryCenter.x) * nx + (midZ - boundaryCenter.z) * nz < 0) {
+      nx *= -1;
+      nz *= -1;
+    }
+    return {
+      id: wall.id,
+      width: length,
+      rotateY: Math.atan2(-dz, dx),
+      position: [midX, centerY, midZ] as [number, number, number],
+      outwardNormal: [nx, nz] as const,
+      planCenter: [boundaryCenter.x, boundaryCenter.z] as const,
+    };
+  }) : [
+    { id: 'north', width, rotateY: 0, position: [0, centerY, -depth / 2] as [number, number, number], outwardNormal: [0, -1] as const, planCenter: [0, 0] as const },
+    { id: 'south', width, rotateY: Math.PI, position: [0, centerY, depth / 2] as [number, number, number], outwardNormal: [0, 1] as const, planCenter: [0, 0] as const },
+    { id: 'west', width: depth, rotateY: Math.PI / 2, position: [-width / 2, centerY, 0] as [number, number, number], outwardNormal: [-1, 0] as const, planCenter: [0, 0] as const },
+    { id: 'east', width: depth, rotateY: -Math.PI / 2, position: [width / 2, centerY, 0] as [number, number, number], outwardNormal: [1, 0] as const, planCenter: [0, 0] as const },
   ];
 
   for (const spec of wallSpecs) {
@@ -477,13 +556,20 @@ function buildWalls(
     const wallCutouts = openings && (spec.id === 'north' || spec.id === 'south' || spec.id === 'east' || spec.id === 'west') ? openingsForWall(openings, spec.id) : [];
     const geometry =
       wallCutouts.length > 0
-        ? buildWallGeometryWithCutouts(THREE, spec.width, wallHeight, wallCutouts)
-        : new THREE.PlaneGeometry(spec.width, wallHeight);
+        ? buildWallGeometryWithCutouts(THREE, spec.width, wallHeight, wallCutouts, DEFAULT_WALL_THICKNESS)
+        : new THREE.BoxGeometry(spec.width, wallHeight, DEFAULT_WALL_THICKNESS);
 
     const wall = new THREE.Mesh(geometry, material);
     wall.rotation.y = spec.rotateY;
     wall.position.set(spec.position[0], spec.position[1], spec.position[2]);
     wall.userData.type = ROOM_OBJECT_TAGS.Wall;
+    wall.userData.exteriorWall = true;
+    wall.userData.exteriorCenterX = spec.position[0];
+    wall.userData.exteriorCenterZ = spec.position[2];
+    wall.userData.exteriorNormalX = spec.outwardNormal[0];
+    wall.userData.exteriorNormalZ = spec.outwardNormal[1];
+    wall.userData.exteriorPlanCenterX = spec.planCenter[0];
+    wall.userData.exteriorPlanCenterZ = spec.planCenter[1];
     const legacyWallId = spec.id.replace('outer-', '');
     const sourceWall = boundaryWalls?.find((wall) => wall.id === spec.id);
     const axisAligned = !sourceWall || Math.abs(sourceWall.x2 - sourceWall.x1) < 0.001 || Math.abs(sourceWall.z2 - sourceWall.z1) < 0.001;
@@ -504,13 +590,13 @@ function buildWalls(
 }
 
 const BASEBOARD_HEIGHT = 0.12;
-const BASEBOARD_DEPTH = 0.04;
+const BASEBOARD_DEPTH = DEFAULT_WALL_THICKNESS + 0.01;
 const BASEBOARD_COLOR = 0xc7cac8;
 
 function addBaseboard(
   THREE: ThreeModule,
   scene: ThreeNS.Scene,
-  spec: { id: string; width: number; rotateY: number; position: readonly [number, number, number] },
+  spec: { id: string; width: number; rotateY: number; position: readonly [number, number, number]; outwardNormal: readonly [number, number]; planCenter: readonly [number, number] },
   yOffset: number,
   ghostOpacity?: number
 ): void {
@@ -540,6 +626,13 @@ function addBaseboard(
   }
   base.receiveShadow = true;
   base.userData.type = ROOM_OBJECT_TAGS.Wall;
+  base.userData.exteriorWall = true;
+  base.userData.exteriorCenterX = spec.position[0];
+  base.userData.exteriorCenterZ = spec.position[2];
+  base.userData.exteriorNormalX = spec.outwardNormal[0];
+  base.userData.exteriorNormalZ = spec.outwardNormal[1];
+  base.userData.exteriorPlanCenterX = spec.planCenter[0];
+  base.userData.exteriorPlanCenterZ = spec.planCenter[1];
   const legacyWallId = spec.id.replace('outer-', '');
   if (legacyWallId === 'north' || legacyWallId === 'south' || legacyWallId === 'east' || legacyWallId === 'west') {
     base.userData.wallId = legacyWallId;
@@ -572,7 +665,8 @@ function buildWallGeometryWithCutouts(
   THREE: ThreeModule,
   wallWidth: number,
   wallHeight: number,
-  cutouts: readonly WallOpening[]
+  cutouts: readonly WallOpening[],
+  thickness = DEFAULT_WALL_THICKNESS
 ): ThreeNS.BufferGeometry {
   const halfW = wallWidth / 2;
   const halfH = wallHeight / 2;
@@ -606,7 +700,11 @@ function buildWallGeometryWithCutouts(
     shape.holes.push(hole);
   }
 
-  return normalizeShapeUvs(new THREE.ShapeGeometry(shape), wallWidth, wallHeight);
+  // A cut-out wall must remain solid too. Extruding the same shape gives door
+  // and window walls the exact thickness of ordinary exterior/interior walls.
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false });
+  geometry.translate(0, 0, -thickness / 2);
+  return normalizeShapeUvs(geometry, wallWidth, wallHeight);
 }
 
 /**

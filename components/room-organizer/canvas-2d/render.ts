@@ -1,6 +1,7 @@
 import { GRID_SIZE_METERS } from '../lib/constants';
 import { rotatedHalfExtents } from '../lib/geometry';
 import { OFFICE_DIGITAL_TWIN_AREAS, OFFICE_DIGITAL_TWIN_PATHS } from '../lib/digital-twin-layers';
+import { findClosedFloorLoops } from '../three/room-floor-zones';
 import type { FloorLayout, FurnitureItem, RoomLayout } from '../lib/types';
 
 export interface Render2DOptions {
@@ -130,6 +131,7 @@ export function render2DTopDown(options: Render2DOptions): void {
   const offsetY = (viewHeight - layout.height * scale) / 2 + (options.panY ?? 0);
 
   drawFloor(ctx, layout, floor, offsetX, offsetY, scale);
+  drawClosedFloorZones(ctx, layout, floor, offsetX, offsetY, scale);
   drawGrid(ctx, layout, offsetX, offsetY, scale);
   drawRoomOutline(ctx, layout, floor, offsetX, offsetY, scale, options.selectedWallId);
   drawInteriorWalls(ctx, layout, floor, offsetX, offsetY, scale, options.selectedWallId);
@@ -205,12 +207,25 @@ function drawWallPreview(
   const x2 = offsetX + (preview.end.x + halfW) * scale;
   const y2 = offsetY + (preview.end.z + halfD) * scale;
   ctx.save();
+  // Canva/BAI-style alignment guides: the current endpoint projects a clear
+  // horizontal and vertical reference across the plan before the wall exists.
+  ctx.strokeStyle = 'rgba(25, 150, 210, 0.78)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 5]);
+  ctx.beginPath();
+  ctx.moveTo(x2, 0);
+  ctx.lineTo(x2, ctx.canvas.height / (ctx.canvas.width / Math.max(1, ctx.canvas.clientWidth || ctx.canvas.width)));
+  ctx.moveTo(0, y2);
+  ctx.lineTo(ctx.canvas.width / (ctx.canvas.width / Math.max(1, ctx.canvas.clientWidth || ctx.canvas.width)), y2);
+  ctx.stroke();
+  ctx.setLineDash([10, 7]);
   ctx.strokeStyle = '#1296c5';
   ctx.lineWidth = 6;
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
   ctx.stroke();
+  ctx.setLineDash([]);
   ctx.fillStyle = '#198cff';
   for (const [x, y] of [[x1, y1], [x2, y2]] as const) {
     ctx.beginPath();
@@ -545,6 +560,46 @@ function drawInteriorWalls(
     ctx.lineTo(x2, y2);
     ctx.stroke();
     drawWallLengthLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2, Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1));
+  }
+  ctx.restore();
+}
+
+/** Paint every newly enclosed wall loop. The largest loop is the original
+ * building footprint and already has a base floor, so it is deliberately
+ * omitted. This makes annexes and corner rooms visible immediately in 2D. */
+function drawClosedFloorZones(
+  ctx: CanvasRenderingContext2D,
+  layout: RoomLayout,
+  floor: FloorLayout,
+  offsetX: number,
+  offsetY: number,
+  scale: number
+): void {
+  const interior = floor.interiorWalls ?? [];
+  if (interior.length === 0) return;
+  const loops = findClosedFloorLoops([...(layout.boundaryWalls ?? []), ...interior]);
+  if (loops.length === 0) return;
+  const polygonArea = (points: readonly { x: number; z: number }[]) => points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length]!;
+    return sum + point.x * next.z - next.x * point.z;
+  }, 0) / 2;
+  const largest = layout.boundaryWalls?.length
+    ? loops.reduce((best, loop, index) => Math.abs(polygonArea(loop)) > Math.abs(polygonArea(loops[best]!)) ? index : best, 0)
+    : -1;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(198, 161, 110, 0.34)';
+  for (const [index, loop] of loops.entries()) {
+    if (index === largest) continue;
+    ctx.beginPath();
+    loop.forEach((point, pointIndex) => {
+      const x = offsetX + (point.x + layout.width / 2) * scale;
+      const y = offsetY + (point.z + layout.height / 2) * scale;
+      if (pointIndex === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
 }
