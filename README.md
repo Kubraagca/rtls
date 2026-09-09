@@ -1,4 +1,4 @@
-# Three.js Sims-like House Builder
+# RTLS
 
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://ch-bas.github.io/threejs-sims-house-builder/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

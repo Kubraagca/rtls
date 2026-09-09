@@ -9,8 +9,8 @@ const nextConfig = {
   output: 'export',
   images: { unoptimized: true },
   ...(isGitHubPages && {
-    basePath: '/threejs-sims-house-builder',
-    assetPrefix: '/threejs-sims-house-builder/',
+    basePath: '/rtls',
+    assetPrefix: '/rtls/',
   }),
 };
 
