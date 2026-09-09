@@ -21,6 +21,11 @@ export const MAX_ROOM_DIMENSION = 100;
 // (camera framing, collision math, shadow map) (#121).
 export const MAX_ITEM_DIMENSION = 50;
 
+// Keep the orbit camera at a useful distance in 3D. These limits are specific
+// to the overview camera and do not affect avatar/camera field-of-view values.
+export const THREE_VIEW_MIN_DISTANCE = 1.5;
+export const THREE_VIEW_MAX_DISTANCE = 35;
+
 /** How far a bracketed security camera stands off the wall, in metres. */
 export const CAMERA_BRACKET_ARM = 0.22;
 

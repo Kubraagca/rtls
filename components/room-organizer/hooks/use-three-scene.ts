@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { reloadOnceForChunkError } from '../lib/chunk-reload';
+import { THREE_VIEW_MAX_DISTANCE, THREE_VIEW_MIN_DISTANCE } from '../lib/constants';
 import { attachDragHandlers } from '../three/drag-handlers';
 import { addLights } from '../three/lighting';
 import { setMaxAnisotropy } from '../three/texture-settings';
@@ -231,8 +232,8 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
       controls.enablePan = true;
-      controls.minDistance = 0.25;
-      controls.maxDistance = 100;
+      controls.minDistance = THREE_VIEW_MIN_DISTANCE;
+      controls.maxDistance = THREE_VIEW_MAX_DISTANCE;
       controls.zoomToCursor = true;
       controls.minPolarAngle = 0.05;
       controls.maxPolarAngle = Math.PI - 0.05;

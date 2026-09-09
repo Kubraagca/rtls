@@ -21,7 +21,12 @@ import { useRecentColors } from './hooks/use-recent-colors';
 import { useSceneEffects, measurementDistance } from './hooks/use-scene-effects';
 import { useThreeScene } from './hooks/use-three-scene';
 import { useWalkthrough } from './hooks/use-walkthrough';
-import { CAMERA_BRACKET_ARM, FURNITURE_CATALOG } from './lib/constants';
+import {
+  CAMERA_BRACKET_ARM,
+  FURNITURE_CATALOG,
+  THREE_VIEW_MAX_DISTANCE,
+  THREE_VIEW_MIN_DISTANCE,
+} from './lib/constants';
 import { DEFAULT_DIGITAL_TWIN_LAYERS, type DigitalTwinLayerState } from './lib/digital-twin-layers';
 import { hasCollisions } from './lib/geometry';
 import { reseatWallMountedItem, settleWallMountedItem } from './lib/opening-snap';
@@ -83,7 +88,7 @@ function zoomCamera(
   const offset = camera.position.clone().sub(controls.target);
   const factor = direction === '+' ? 0.72 : 1.32;
   offset.multiplyScalar(factor);
-  const distance = Math.max(0.8, Math.min(100, offset.length()));
+  const distance = Math.max(THREE_VIEW_MIN_DISTANCE, Math.min(THREE_VIEW_MAX_DISTANCE, offset.length()));
   offset.setLength(distance);
   camera.position.copy(controls.target).add(offset);
   controls.update();

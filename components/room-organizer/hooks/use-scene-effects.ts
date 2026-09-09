@@ -513,7 +513,10 @@ export function useSceneEffects({
       // Never allow the orbit camera to pass below the active floor. This
       // prevents seeing the underside of the plan while still allowing the
       // user to orbit upward and inspect the ceiling.
-      const minimumCameraY = activeFloorY + 0.05;
+      // Keep the overview camera clearly above the floor while zooming in.
+      // A tiny epsilon still lets the camera look through the floor at close
+      // range, especially when OrbitControls is damping toward a new pose.
+      const minimumCameraY = activeFloorY + 1.75;
       if (camera.position.y < minimumCameraY) camera.position.y = minimumCameraY;
       applyWallDisplay(scene, camera.position.x, camera.position.z, view.wallDisplay, layout.width, layout.height);
       const THREE = threeModuleRef.current;
