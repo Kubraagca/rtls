@@ -7,6 +7,9 @@ export const OFFICE_AVATAR_GLB_PATH = '/models/avatars/scanned-animated-walking-
 export const OFFICE_AVATAR_SITTING_GLB_PATH = '/models/avatars/scanned-animated-walking-man/scanned_man_sitting.glb';
 export const OFFICE_AVATAR_IDLE_GLB_PATH = '/models/avatars/scanned-animated-walking-man/scanned_man_idle.glb';
 export const OFFICE_AVATAR_OBJ_PATH = '/models/avatars/office-man-1/Office%20man%201.obj';
+export const FEMALE_OFFICE_AVATAR_GLB_PATH = '/models/avatars/female-walking.glb';
+export const FEMALE_OFFICE_AVATAR_IDLE_GLB_PATH = '/models/avatars/female-idle.glb';
+export const FEMALE_OFFICE_AVATAR_SITTING_GLB_PATH = '/models/avatars/female-sitting.glb';
 
 export interface OfficeAvatarAsset {
   scene: ThreeNS.Group;
@@ -32,6 +35,9 @@ let officeAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
 let officeSittingAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
 let officeIdleAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
 let idleAnimationsLogged = false;
+let femaleOfficeAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
+let femaleOfficeIdleAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
+let femaleOfficeSittingAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
 /**
  * Load the user-supplied rigged GLB first. The legacy OBJ remains only as a
  * defensive visual fallback; OBJ cannot carry the skeleton/animation clips.
@@ -146,6 +152,56 @@ export function loadOfficeIdleAvatar(
     });
 
   return officeIdleAvatarPromise;
+}
+
+function loadFemaleAvatarAsset(
+  path: string,
+  sourceName: string,
+  cache: { current: Promise<OfficeAvatarAsset | null> | null }
+): Promise<OfficeAvatarAsset | null> {
+  if (cache.current) return cache.current;
+  cache.current = new GLTFLoader().loadAsync(path).then((gltf) => {
+    const scene = gltf.scene;
+    prepareGlbAvatar(scene);
+    scene.userData.assetSource = sourceName;
+    return {
+      scene,
+      animations: gltf.animations.map((clip) => makeInPlaceClip(clip)),
+      source: 'glb' as const,
+    };
+  }).catch((error) => {
+    console.warn(`${sourceName} could not be loaded.`, error);
+    return null;
+  });
+  return cache.current;
+}
+
+export function loadFemaleOfficeAvatar(THREE: typeof import('three')): Promise<OfficeAvatarAsset | null> {
+  void THREE;
+  return loadFemaleAvatarAsset(FEMALE_OFFICE_AVATAR_GLB_PATH, 'female-walking.glb', {
+    get current() { return femaleOfficeAvatarPromise; },
+    set current(value) { femaleOfficeAvatarPromise = value; },
+  });
+}
+
+export function loadFemaleOfficeIdleAvatar(THREE: typeof import('three')): Promise<OfficeAvatarAsset | null> {
+  void THREE;
+  return loadFemaleAvatarAsset(FEMALE_OFFICE_AVATAR_IDLE_GLB_PATH, 'female-idle.glb', {
+    get current() { return femaleOfficeIdleAvatarPromise; },
+    set current(value) { femaleOfficeIdleAvatarPromise = value; },
+  });
+}
+
+export function loadFemaleOfficeSittingAvatar(THREE: typeof import('three')): Promise<OfficeAvatarAsset | null> {
+  void THREE;
+  return loadFemaleAvatarAsset(FEMALE_OFFICE_AVATAR_SITTING_GLB_PATH, 'female-sitting.glb', {
+    get current() { return femaleOfficeSittingAvatarPromise; },
+    set current(value) { femaleOfficeSittingAvatarPromise = value; },
+  });
+}
+
+export function loadFemaleOfficeTypingAvatar(THREE: typeof import('three')): Promise<OfficeAvatarAsset | null> {
+  return loadFemaleOfficeSittingAvatar(THREE);
 }
 /**
  * SkeletonUtils.clone is required for skinned GLB avatars. Object3D.clone()

@@ -21,7 +21,11 @@ import { clearRoomFloorZones, findClosedFloorLoops, renderRoomFloorZones } from 
 import { clearItemLabels, renderItemLabels } from '../three/item-labels';
 import { applyTimeOfDay, isLightItemType } from '../three/lighting';
 import { clearMeasurement, renderMeasurement } from '../three/measurement';
-import { cloneAndFitOfficeAvatar, loadOfficeIdleAvatar } from '../three/office-avatar';
+import {
+  cloneAndFitOfficeAvatar,
+  loadFemaleOfficeIdleAvatar,
+  loadOfficeIdleAvatar,
+} from '../three/office-avatar';
 import { setOutdoorVisible } from '../three/outdoor';
 import { buildRoof, removeRoof } from '../three/roof';
 import { ROOM_OBJECT_TAGS, applyWallDisplay, buildRoom, clearFloorPlanImageCache, removeTagged } from '../three/room-builder';
@@ -627,8 +631,11 @@ export function useSceneEffects({
             invalidate();
             requestShadowUpdate();
           });
-        } else if (item.type === 'office-avatar') {
-          void loadOfficeIdleAvatar(THREE).then((source) => {
+        } else if (item.type === 'office-avatar' || item.type === 'female-office-avatar') {
+          const loadIdleAvatar = item.type === 'female-office-avatar'
+            ? loadFemaleOfficeIdleAvatar
+            : loadOfficeIdleAvatar;
+          void loadIdleAvatar(THREE).then((source) => {
             if (!source || disposed || !group.parent) return;
             for (const child of [...group.children]) {
               group.remove(child);

@@ -56,7 +56,10 @@ export function createRtlsScannedCrowdRenderer(
   const skinned = findFirstSkinnedMesh(sample.model);
   if (!skinned) return null;
 
-  const walkClip = findClip(sample.animations, ['Take 001', 'Rig|walk', 'walk', 'walking']);
+  // Some Mixamo GLBs expose their only walking clip as `mixamo.com`.
+  // Falling back to the first clip prevents moving-but-static avatars.
+  const walkClip = findClip(sample.animations, ['Take 001', 'Rig|walk', 'walk', 'walking', 'mixamo.com'])
+    ?? sample.animations[0];
   const root = new THREE.Group();
   root.name = 'rtls-scanned-glb-crowd';
   root.userData.type = 'rtls-scanned-crowd';

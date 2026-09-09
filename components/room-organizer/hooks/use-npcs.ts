@@ -2,6 +2,10 @@ import { useEffect, useRef } from 'react';
 import { getRtlsPersonItems } from '../lib/rtls-person-items';
 import {
   cloneAndFitOfficeAvatar,
+  loadFemaleOfficeAvatar,
+  loadFemaleOfficeIdleAvatar,
+  loadFemaleOfficeSittingAvatar,
+  loadFemaleOfficeTypingAvatar,
   loadOfficeAvatar,
   loadOfficeIdleAvatar,
   loadOfficeSittingAvatar,
@@ -14,6 +18,7 @@ import type * as ThreeNS from 'three';
 type ThreeModule = typeof import('three');
 
 type RtlsAvatarMode = 'walking' | 'idle' | 'working';
+type AvatarVariant = 'male' | 'female';
 type TargetKind = 'desk' | 'roam';
 type RenderMode = 'full' | 'proxy' | 'hidden';
 
@@ -69,6 +74,7 @@ interface NpcState {
   renderMode: RenderMode;
   visibleInFrustum: boolean;
   cameraDistance: number;
+  avatarVariant: AvatarVariant;
 }
 
 interface FullAvatarSlot {
@@ -89,6 +95,7 @@ interface FullAvatarSlot {
   statusRing: ThreeNS.Mesh;
   labelKey: string;
   shadowEnabled: boolean;
+  avatarVariant: AvatarVariant;
 }
 
 export interface UseNpcsOptions {
@@ -221,36 +228,41 @@ export function useNpcs(options: UseNpcsOptions): void {
 
     let disposed = false;
     let crowdRenderer: RtlsScannedCrowdRenderer | null = null;
+    let femaleCrowdRenderer: RtlsScannedCrowdRenderer | null = null;
     const fullSlots: FullAvatarSlot[] = [];
     fullSlotsRef.current = fullSlots;
 
     void Promise.all([
-  loadOfficeAvatar(THREE),
-  loadOfficeIdleAvatar(THREE),
-  loadOfficeSittingAvatar(THREE)
-]).then(([asset, idleAsset, sittingAsset]) => {
+      loadOfficeAvatar(THREE),
+      loadOfficeIdleAvatar(THREE),
+      loadOfficeSittingAvatar(THREE),
+      loadFemaleOfficeAvatar(THREE),
+      loadFemaleOfficeIdleAvatar(THREE),
+      loadFemaleOfficeSittingAvatar(THREE),
+      loadFemaleOfficeTypingAvatar(THREE),
+    ]).then(([asset, idleAsset, sittingAsset, femaleAsset, femaleIdleAsset, femaleSittingAsset, femaleTypingAsset]) => {
       if (disposed || !asset) return;
       crowdRenderer = createRtlsScannedCrowdRenderer(
-  THREE,
-  scene,
-  asset,
-  idleAsset,
-  sittingAsset,
-  Math.max(1, npcs.length),
-  OFFICE_AVATAR_TARGET_HEIGHT
-);
+        THREE, scene, asset, idleAsset, sittingAsset,
+        Math.max(1, npcs.filter((npc) => npc.avatarVariant === 'male').length),
+        OFFICE_AVATAR_TARGET_HEIGHT
+      );
+      if (femaleAsset) {
+        femaleCrowdRenderer = createRtlsScannedCrowdRenderer(
+          THREE, scene, femaleAsset, femaleIdleAsset, femaleSittingAsset,
+          Math.max(1, npcs.filter((npc) => npc.avatarVariant === 'female').length),
+          OFFICE_AVATAR_TARGET_HEIGHT
+        );
+      }
       crowdRenderer?.setVisible(render3DRef.current);
+      femaleCrowdRenderer?.setVisible(render3DRef.current);
 
       const poolSize = Math.min(MAX_FULL_AVATARS, npcs.length);
       for (let index = 0; index < poolSize; index += 1) {
-       const slot = createFullAvatarSlot(
-  THREE,
-  scene,
-  asset,
-  idleAsset,
-  sittingAsset,
-  index
-);
+        const npc = npcs[index]!;
+        const slot = npc.avatarVariant === 'female'
+          ? createFullAvatarSlot(THREE, scene, femaleAsset ?? asset, femaleIdleAsset, femaleTypingAsset ?? femaleSittingAsset, femaleSittingAsset, index, 'female')
+          : createFullAvatarSlot(THREE, scene, asset, idleAsset, sittingAsset, sittingAsset, index, 'male');
         slot.labelSprite.visible = false;
         fullSlots.push(slot);
       }
@@ -318,6 +330,7 @@ export function useNpcs(options: UseNpcsOptions): void {
           priorityDeviceIdRef.current
         );
         crowdRenderer?.setVisible(render3DRef.current);
+        femaleCrowdRenderer?.setVisible(render3DRef.current);
         changed = true;
       }
 
@@ -328,7 +341,8 @@ export function useNpcs(options: UseNpcsOptions): void {
       if (proxyAccumulator >= PROXY_REFRESH_SECONDS) {
         proxyAccumulator = 0;
         lastProxyCount = render3DRef.current
-          ? (crowdRenderer?.update(npcs.map(toCrowdAgent), floorY) ?? 0)
+          ? (crowdRenderer?.update(npcs.filter((npc) => npc.avatarVariant === 'male').map(toCrowdAgent), floorY) ?? 0)
+            + (femaleCrowdRenderer?.update(npcs.filter((npc) => npc.avatarVariant === 'female').map(toCrowdAgent), floorY) ?? 0)
           : 0;
         changed = changed || lastProxyCount > 0;
       }
@@ -355,6 +369,7 @@ export function useNpcs(options: UseNpcsOptions): void {
       disposed = true;
       cancelAnimationFrame(rafId);
       crowdRenderer?.dispose();
+      femaleCrowdRenderer?.dispose();
       for (const slot of fullSlots) disposeFullAvatarSlot(scene, slot);
       fullSlots.length = 0;
       fullSlotsRef.current = [];
@@ -437,7 +452,12 @@ function createNpc(
     target: { x: initial.x, z: initial.z },
     targetKind: initial.kind,
     targetFaceYaw: initial.faceYaw,
-    speed: 0.72 + (index % 7) * 0.045,
+    // The female Mixamo walk cycle is authored at a normal walking cadence;
+    // keep its world travel speed in sync so it does not look like the same
+    // short step is restarting several times before reaching the station.
+    speed: sourceItem.type === 'female-office-avatar'
+      ? 1.18 + (index % 5) * 0.04
+      : 0.72 + (index % 7) * 0.045,
     phase: index * 0.71,
     mode: 'walking',
     modeUntil: 0,
@@ -446,6 +466,7 @@ function createNpc(
     renderMode: 'hidden',
     visibleInFrustum: false,
     cameraDistance: Number.POSITIVE_INFINITY,
+    avatarVariant: sourceItem.type === 'female-office-avatar' ? 'female' : 'male',
   };
 }
 
@@ -530,7 +551,9 @@ function createFullAvatarSlot(
   asset: OfficeAvatarAsset,
   idleAsset: OfficeAvatarAsset | null,
   sittingAsset: OfficeAvatarAsset | null,
-  slotIndex: number
+  workingAsset: OfficeAvatarAsset | null,
+  slotIndex: number,
+  avatarVariant: AvatarVariant
 ): FullAvatarSlot {
   const container = new THREE.Group();
   container.name = `rtls-full-avatar-slot-${slotIndex + 1}`;
@@ -563,8 +586,9 @@ function createFullAvatarSlot(
 
   let sittingModel: ThreeNS.Group | undefined;
   let sittingAnimations: readonly ThreeNS.AnimationClip[] = [];
-  if (sittingAsset) {
-    const sittingInstance = cloneAndFitOfficeAvatar(THREE, sittingAsset, OFFICE_AVATAR_TARGET_HEIGHT, {
+  const workingSource = workingAsset ?? sittingAsset;
+  if (workingSource) {
+    const sittingInstance = cloneAndFitOfficeAvatar(THREE, workingSource, OFFICE_AVATAR_TARGET_HEIGHT, {
       shareResources: true,
       castShadow: false,
       receiveShadow: false,
@@ -599,10 +623,13 @@ function createFullAvatarSlot(
 
   if (walkingInstance.animations.length > 0) {
     walkingMixer = new THREE.AnimationMixer(walkingModel);
+    // Mixamo exports commonly name the only clip `mixamo.com`; use the
+    // first clip as a safe fallback so the character cannot slide with static
+    // legs when a GLB uses a generic clip name.
     const walkClip = findAvatarClip(
       walkingInstance.animations,
-      ['Rig|walk', 'walk', 'walking', 'Take 001']
-    );
+      ['Rig|walk', 'walk', 'walking', 'Take 001', 'mixamo.com']
+    ) ?? walkingInstance.animations[0];
     if (walkClip) actions.walking = walkingMixer.clipAction(walkClip);
   }
 
@@ -624,10 +651,9 @@ function createFullAvatarSlot(
 
   if (sittingModel && sittingAnimations.length > 0) {
     sittingMixer = new THREE.AnimationMixer(sittingModel);
-    const sitClip = findAvatarClip(
-      sittingAnimations,
-      ['Sitting Idle', 'sitting', 'sit', 'mixamo.com', 'Take 001']
-    );
+    const sitClip = avatarVariant === 'female' && sittingAnimations.length > 1
+      ? sittingAnimations[1]
+      : findAvatarClip(sittingAnimations, ['Sitting Idle', 'sitting', 'sit', 'mixamo.com', 'Take 001']);
     if (sitClip) actions.working = sittingMixer.clipAction(sitClip);
   }
 
@@ -648,6 +674,7 @@ function createFullAvatarSlot(
     statusRing,
     labelKey: '',
     shadowEnabled: false,
+    avatarVariant,
   };
 }
 
@@ -691,8 +718,10 @@ function updateLodAssignments(
     ? npcs.findIndex((npc) => String(npc.group.userData.rtlsId) === priorityDeviceId)
     : -1;
 
+  const availableVariants = new Set(slots.map((slot) => slot.avatarVariant));
   const candidates = npcs
-    .filter((npc) => npc.visibleInFrustum && npc.cameraDistance <= FULL_AVATAR_MAX_XZ_DISTANCE)
+    .filter((npc) => availableVariants.has(npc.avatarVariant)
+      && npc.visibleInFrustum && npc.cameraDistance <= FULL_AVATAR_MAX_XZ_DISTANCE)
     .sort((a, b) => {
       if (a.index === priorityIndex) return -1;
       if (b.index === priorityIndex) return 1;
@@ -715,7 +744,7 @@ function updateLodAssignments(
     if (!npc) continue;
     npc.renderMode = 'full';
     if (slots.some((slot) => slot.assignedNpcIndex === index)) continue;
-    const free = slots.find((slot) => slot.assignedNpcIndex === undefined);
+    const free = slots.find((slot) => slot.assignedNpcIndex === undefined && slot.avatarVariant === npc.avatarVariant);
     if (free) assignSlot(free, npc);
   }
 
@@ -828,7 +857,7 @@ function syncSlotAnimation(slot: FullAvatarSlot, mode: RtlsAvatarMode, immediate
   }
 
   next.enabled = true;
-  next.setEffectiveTimeScale(mode === 'walking' ? 1.05 : 1);
+  next.setEffectiveTimeScale(mode === 'walking' ? (slot.avatarVariant === 'female' ? 1.28 : 1.05) : 1);
   next.setEffectiveWeight(1);
   next.reset();
   if (fadeSeconds > 0) next.fadeIn(fadeSeconds);

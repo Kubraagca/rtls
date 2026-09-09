@@ -188,6 +188,7 @@ export const FURNITURE_CATALOG = [
   { type: 'gltf-vase', category: 'decor', name: 'Dekoratif Vazo', width: 0.35, depth: 0.35, height: 0.7, color: '#d7b4d8', icon: '♢', price: 75 },
   { type: 'gltf-lamp', category: 'electronics', name: 'Zemin Lambası', width: 0.65, depth: 0.65, height: 1.5, color: '#d7a84a', icon: '◉', price: 180 },
   { type: 'office-avatar', category: 'people', name: 'Scanned Walking Man', width: 0.62, depth: 0.45, height: 1.78, color: '#4f6f86', icon: '🧍', price: 0 },
+  { type: 'female-office-avatar', category: 'people', name: 'Female Office Avatar', width: 0.62, depth: 0.45, height: 1.78, color: '#9b6fa8', icon: '👩', price: 0 },
 
   // Structure
   { type: 'door', category: 'structure', name: 'Ofis Kapısı', width: 0.95, depth: 0.12, height: 2.1, color: '#6d5138', icon: '🚪', price: 360 },

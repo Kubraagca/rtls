@@ -176,7 +176,7 @@ export function createFurnitureModel(
   // the editor never renders an empty placeholder while an asset is missing.
   const builder: FurnitureBuilder = item.type === 'custom-glb'
     ? buildCustomGlbPlaceholder
-    : item.type.startsWith('gltf-') || item.type === 'office-avatar'
+    : item.type.startsWith('gltf-') || item.type === 'office-avatar' || item.type === 'female-office-avatar'
       ? buildEmpty
       : (BUILDERS[item.type] ?? buildEmpty);
   return builder(ctx);
