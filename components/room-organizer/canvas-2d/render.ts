@@ -1,7 +1,7 @@
 import { GRID_SIZE_METERS } from '../lib/constants';
 import { rotatedHalfExtents } from '../lib/geometry';
 import { OFFICE_DIGITAL_TWIN_AREAS, OFFICE_DIGITAL_TWIN_PATHS } from '../lib/digital-twin-layers';
-import { findClosedFloorLoops } from '../three/room-floor-zones';
+import { findFloorLoops } from '../three/room-floor-zones';
 import type { FloorLayout, FurnitureItem, RoomLayout } from '../lib/types';
 
 export interface Render2DOptions {
@@ -577,15 +577,11 @@ function drawClosedFloorZones(
 ): void {
   const interior = floor.interiorWalls ?? [];
   if (interior.length === 0) return;
-  const loops = findClosedFloorLoops([...(layout.boundaryWalls ?? []), ...interior]);
+  const loops = findFloorLoops([...(layout.boundaryWalls ?? []), ...interior]);
   if (loops.length === 0) return;
-  const polygonArea = (points: readonly { x: number; z: number }[]) => points.reduce((sum, point, index) => {
-    const next = points[(index + 1) % points.length]!;
-    return sum + point.x * next.z - next.x * point.z;
-  }, 0) / 2;
-  const largest = layout.boundaryWalls?.length
-    ? loops.reduce((best, loop, index) => Math.abs(polygonArea(loop)) > Math.abs(polygonArea(loops[best]!)) ? index : best, 0)
-    : -1;
+  // Keep the original room visible as well as any attached/open room zones.
+  // The largest loop is not necessarily the original footprint.
+  const largest = -1;
 
   ctx.save();
   ctx.fillStyle = 'rgba(198, 161, 110, 0.34)';

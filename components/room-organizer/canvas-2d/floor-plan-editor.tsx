@@ -15,6 +15,7 @@ interface FloorPlanEditorProps {
   actions: LayoutActions;
   onSelectWall(id: string | null, kind?: 'exterior' | 'interior'): void;
   onSelectItem(id: string | null): void;
+  onAreaSelect?(ids: string[]): void;
   onWheel?(deltaY: number, clientX: number, clientY: number): void;
   onResizePan?(x: number, y: number): void;
   wallDraft?: { x: number; z: number } | null;
@@ -28,10 +29,12 @@ interface FloorPlanEditorProps {
 type DragState = { kind: 'wall'; wall: InteriorWall; x: number; y: number } | { kind: 'endpoint'; wall: InteriorWall; endpoint: 'start' | 'end'; x: number; y: number } | { kind: 'item'; id: string; x: number; y: number } | { kind: 'edge'; edge: 'north' | 'south' | 'east' | 'west'; x: number; y: number } | null;
 
 
-export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId, planZoom = 1, planPanX = 0, planPanY = 0, actions, onSelectWall, onSelectItem, onWheel, onResizePan, wallDraft, pointerWorld, onPointerMove, onPointerDown, onPointerUp, drawWallMode }: FloorPlanEditorProps): JSX.Element {
+export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId, planZoom = 1, planPanX = 0, planPanY = 0, actions, onSelectWall, onSelectItem, onAreaSelect, onWheel, onResizePan, wallDraft, pointerWorld, onPointerMove, onPointerDown, onPointerUp, drawWallMode }: FloorPlanEditorProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [areaStart, setAreaStart] = useState<{ x: number; y: number } | null>(null);
+  const [areaEnd, setAreaEnd] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
@@ -47,8 +50,16 @@ export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId,
   const oy = (size.height - layout.height * scale) / 2 + planPanY;
   const sx = (x: number) => ox + (x + layout.width / 2) * scale;
   const sy = (z: number) => oy + (z + layout.height / 2) * scale;
+  const localPoint = (event: { clientX: number; clientY: number }) => {
+    const rect = hostRef.current?.getBoundingClientRect();
+    return { x: event.clientX - (rect?.left ?? 0), y: event.clientY - (rect?.top ?? 0) };
+  };
   const start = (event: React.PointerEvent<SVGElement>, drag: Exclude<DragState, null>) => { event.stopPropagation(); event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); dragRef.current = { ...drag, x: event.clientX, y: event.clientY } as DragState; };
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (areaStart) {
+      setAreaEnd(localPoint(event));
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
     const dx = (event.clientX - drag.x) / scale;
@@ -86,8 +97,27 @@ export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId,
     { id: 'outer-south', x1: layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: layout.height / 2 },
     { id: 'outer-west', x1: -layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: -layout.height / 2 },
   ];
+  const finishArea = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!areaStart) return;
+    const end = localPoint(event);
+    const minX = Math.min(areaStart.x, end.x);
+    const maxX = Math.max(areaStart.x, end.x);
+    const minY = Math.min(areaStart.y, end.y);
+    const maxY = Math.max(areaStart.y, end.y);
+    const ids = floor.items.filter((item) => {
+      if (!item.position) return false;
+      const x = sx(item.position.x);
+      const y = sy(item.position.z);
+      return x >= minX && x <= maxX && y >= minY && y <= maxY;
+    }).map((item) => item.id);
+    setAreaStart(null);
+    setAreaEnd(null);
+    onAreaSelect?.(ids);
+  };
+
   return <div ref={hostRef} style={{ position: 'absolute', inset: 0, zIndex: 7 }}>
-    {size.width > 0 && <svg width={size.width} height={size.height} style={{ width: '100%', height: '100%', touchAction: 'none', pointerEvents: drawWallMode ? 'none' : 'auto' }} onWheel={(event) => { event.preventDefault(); onWheel?.(event.deltaY, event.clientX, event.clientY); }} onPointerMove={(event) => { onPointerMove?.(event.clientX, event.clientY); move(event); }} onPointerUp={() => { dragRef.current = null; onPointerUp?.(); }} onPointerCancel={() => { dragRef.current = null; onPointerUp?.(); }} onPointerDownCapture={(event) => { if (!drawWallMode) return; event.preventDefault(); event.stopPropagation(); onPointerDown?.(event.clientX, event.clientY); }} onPointerDown={(event) => { if (drawWallMode) return; onPointerDown?.(event.clientX, event.clientY); onSelectWall(null); onSelectItem(null); }}>
+    {size.width > 0 && <svg width={size.width} height={size.height} style={{ width: '100%', height: '100%', touchAction: 'none', pointerEvents: drawWallMode ? 'none' : 'auto' }} onWheel={(event) => { event.preventDefault(); onWheel?.(event.deltaY, event.clientX, event.clientY); }} onPointerMove={(event) => { onPointerMove?.(event.clientX, event.clientY); move(event); }} onPointerUp={(event) => { finishArea(event); dragRef.current = null; onPointerUp?.(); }} onPointerCancel={() => { setAreaStart(null); setAreaEnd(null); dragRef.current = null; onPointerUp?.(); }} onPointerDownCapture={(event) => { if (event.altKey && !drawWallMode && onAreaSelect) { event.preventDefault(); event.stopPropagation(); const point = localPoint(event); setAreaStart(point); setAreaEnd(point); event.currentTarget.setPointerCapture(event.pointerId); return; } if (!drawWallMode) return; event.preventDefault(); event.stopPropagation(); onPointerDown?.(event.clientX, event.clientY); }} onPointerDown={(event) => { if (drawWallMode || areaStart) return; onPointerDown?.(event.clientX, event.clientY); onSelectWall(null); onSelectItem(null); }}>
+      {areaStart && areaEnd && <rect x={Math.min(areaStart.x, areaEnd.x)} y={Math.min(areaStart.y, areaEnd.y)} width={Math.abs(areaEnd.x - areaStart.x)} height={Math.abs(areaEnd.y - areaStart.y)} fill="rgba(25,198,209,.16)" stroke="#19c6d1" strokeDasharray="6 4" pointerEvents="none" />}
       {wallDraft && pointerWorld && <>
         <line x1={sx(wallDraft.x)} y1={0} x2={sx(wallDraft.x)} y2={size.height} stroke="#22b8ff" strokeWidth="1" strokeDasharray="5 5" pointerEvents="none" />
         <line x1={0} y1={sy(wallDraft.z)} x2={size.width} y2={sy(wallDraft.z)} stroke="#22b8ff" strokeWidth="1" strokeDasharray="5 5" pointerEvents="none" />

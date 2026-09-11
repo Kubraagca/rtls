@@ -270,7 +270,10 @@ export function useWalkthrough(options: UseWalkthroughOptions): void {
     // the floor. Testing the proposed position instead of raycasting the view
     // lets the player pass through any real gap and naturally slide along the
     // first blocked axis rather than getting stuck at a corner.
-    const AVATAR_COLLISION_RADIUS = 0.2;
+    // Keep only a small body clearance around furniture. The furniture
+    // footprint itself is already the solid area; a 20 cm expansion made
+    // desks and chairs feel surrounded by an invisible wide wall.
+    const AVATAR_COLLISION_RADIUS = 0.08;
     const NON_BLOCKING_TYPES = new Set([
       'rug', 'painting', 'mirror', 'curtains', 'wall-shelf', 'wall-clock',
       'pendant-light', 'door', 'window', 'security-camera', 'wifi', 'router',

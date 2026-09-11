@@ -18,8 +18,8 @@ const WALL_LABELS: Record<WallId, string> = {
 const FLOOR_PATTERNS: ReadonlyArray<FloorPattern> = ['solid', 'wood', 'tile', 'concrete'];
 const WALL_PATTERNS: ReadonlyArray<WallPattern> = ['solid', 'brick', 'panel', 'plaster'];
 
-const DEFAULT_WALL_COLOR = '#d6d3ce';
-const DEFAULT_FLOOR_COLOR = '#c9a57d';
+const DEFAULT_WALL_COLOR = '#e3e4e6';
+const DEFAULT_FLOOR_COLOR = '#686d73';
 const CORPORATE_COLORS = [
   '#ffffff', '#f7f7f5', '#eeeae3', '#e5ded2',
   '#d6d3ce', '#b8bcc0', '#8b9298', '#5f6870',

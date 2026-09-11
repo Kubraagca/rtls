@@ -32,6 +32,7 @@ export interface UseItemPlacementParams {
   activeFloorY: number;
   roomWidth: number;
   roomDepth: number;
+  boundaryWalls?: FloorLayout['interiorWalls'];
   actions: LayoutActions;
   view: Pick<ViewSettings, 'snapToGrid' | 'snapToWall' | 'snapToItems'>;
 }
@@ -49,6 +50,7 @@ export function useItemPlacement({
   activeFloorY,
   roomWidth,
   roomDepth,
+  boundaryWalls,
   actions,
   view,
 }: UseItemPlacementParams): UseItemPlacementResult {
@@ -61,6 +63,7 @@ export function useItemPlacement({
       // a "free-floating" opening. Force-snap them regardless of the toggle.
       if (item && isOpening(item.type)) {
         const snapped = snapOpeningToWall({
+          boundaryWalls,
           position: result,
           itemWidth: item.width,
           roomWidth,
@@ -105,6 +108,7 @@ export function useItemPlacement({
       activeFloor.interiorWalls,
       roomWidth,
       roomDepth,
+      boundaryWalls,
     ]
   );
 
@@ -120,6 +124,7 @@ export function useItemPlacement({
     (catalogItem: CatalogItem, position?: { x: number; z: number }) => {
       if (isOpening(catalogItem.type)) {
         const snapped = snapOpeningToWall({
+          boundaryWalls,
           position: position ?? { x: 0, z: 0 },
           itemWidth: catalogItem.width,
           roomWidth,
@@ -166,7 +171,7 @@ export function useItemPlacement({
       if (elevation > 0) actions.updateItem(id, { elevation });
       return id;
     },
-    [actions, activeFloor.interiorWalls, activeFloorY, roomWidth, roomDepth]
+    [actions, activeFloor.items, activeFloor.interiorWalls, activeFloorY, roomWidth, roomDepth, boundaryWalls]
   );
 
   return { snapPosition, getDragPlaneY, placeCatalogItem };

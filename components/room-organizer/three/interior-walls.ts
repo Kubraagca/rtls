@@ -1,5 +1,6 @@
 import { removeAndDispose } from './builder-utils';
 import { classifyOpeningOwners, mergeHoleRects, type OpeningOwner } from './wall-openings';
+import { ROOM_WALL_HEIGHT_METERS } from '../lib/constants';
 import type { FurnitureItem, InteriorWall } from '../lib/types';
 import type * as ThreeNS from 'three';
 
@@ -7,7 +8,8 @@ type ThreeModule = typeof import('three');
 
 const INTERIOR_WALL_TAG = 'interior-wall';
 const WALL_THICKNESS = 0.16;
-const WALL_HEIGHT = 2.6;
+// Interior walls must use the same storey height as the exterior shell.
+const WALL_HEIGHT = ROOM_WALL_HEIGHT_METERS;
 
 interface SegmentOpening {
   /** Centre position along the wall, measured from the segment midpoint (m). */

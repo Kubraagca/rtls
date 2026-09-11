@@ -1,6 +1,6 @@
 import { MAX_FLOORS, MAX_ROOM_DIMENSION } from '../lib/constants';
 import { rotatedHalfExtents } from '../lib/geometry';
-import { settleWallMountedItem } from '../lib/opening-snap';
+import { isOpening, settleWallMountedItem } from '../lib/opening-snap';
 import type {
   CatalogItem,
   FloorLayout,
@@ -84,14 +84,14 @@ export interface LayoutState {
 export const INITIAL_GROUND_FLOOR: FloorLayout = {
   id: 'ground',
   name: 'Ana Ofis',
-  floorColor: '#9b7857',
-  floorPattern: 'wood',
+  floorColor: '#686d73',
+  floorPattern: 'concrete',
   wallPattern: 'plaster',
   wallColors: {
-    north: '#ecebe6',
-    south: '#ecebe6',
-    east: '#e5e8e7',
-    west: '#e5e8e7',
+    north: '#e3e4e6',
+    south: '#e3e4e6',
+    east: '#d5d7da',
+    west: '#d5d7da',
   },
   items: [
     // Reception + waiting area (south/front)
@@ -208,25 +208,35 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
       return withLayout(state, (layout) => ({ ...layout, height: clampRoomDimension(action.height) }));
 
     case 'resizeRoom':
-      return withLayout(state, (layout) => normaliseBoundarySize({
-        ...layout,
-        width: clampRoomDimension(action.width),
-        height: clampRoomDimension(action.height),
-        floors: layout.floors.map((floor, index) => index === state.activeFloorIndex ? {
-          ...floor,
-          items: floor.items.map((item) => item.position ? {
-            ...item,
-            position: { x: item.position.x + action.shiftX, z: item.position.z + action.shiftZ },
-          } : item),
-          interiorWalls: (floor.interiorWalls ?? []).map((wall) => ({
-            ...wall,
-            x1: wall.x1 + action.shiftX,
-            x2: wall.x2 + action.shiftX,
-            z1: wall.z1 + action.shiftZ,
-            z2: wall.z2 + action.shiftZ,
-          })),
-        } : floor),
-      }));
+      return withLayout(state, (layout) => {
+        const width = clampRoomDimension(action.width);
+        const height = clampRoomDimension(action.height);
+        const resizeWalls = (walls: readonly InteriorWall[] | undefined): InteriorWall[] | undefined =>
+          walls?.map((wall) => resizeWallWithAnchoredEndpoints(
+            wall,
+            layout.width,
+            layout.height,
+            width,
+            height,
+            action.shiftX,
+            action.shiftZ,
+          ));
+        const next = {
+          ...layout,
+          width,
+          height,
+          boundaryWalls: resizeWalls(layout.boundaryWalls),
+          floors: layout.floors.map((floor, index) => index === state.activeFloorIndex ? {
+            ...floor,
+            items: floor.items.map((item) => item.position ? {
+              ...item,
+              position: { x: item.position.x + action.shiftX, z: item.position.z + action.shiftZ },
+            } : item),
+            interiorWalls: resizeWalls(floor.interiorWalls),
+          } : floor),
+        };
+        return normaliseBoundarySize(next);
+      });
 
     // -- floor-scoped finishes ----------------------------------------------
     case 'setFloorColor':
@@ -346,9 +356,15 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
       }));
 
     case 'moveItem':
-      return patchItem(state, action.id, () => ({
-        position: { x: action.x, z: action.z },
-      }));
+      return patchItem(state, action.id, (item) => {
+        const position = { x: action.x, z: action.z };
+        const floor = state.layout.floors[state.activeFloorIndex];
+        if (isOpening(item.type)) {
+          return settleWallMountedItem(item, position, state.layout.width, state.layout.height,
+            floor?.interiorWalls, state.layout.boundaryWalls) ?? {};
+        }
+        return { position };
+      });
 
     case 'resizeItem':
       return patchItem(state, action.id, () => ({
@@ -627,6 +643,38 @@ export function layoutReducer(state: LayoutState, action: LayoutAction): LayoutS
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Move a wall with the room, while keeping endpoints attached to moved edges. */
+function resizeWallWithAnchoredEndpoints(
+  wall: InteriorWall,
+  oldWidth: number,
+  oldHeight: number,
+  newWidth: number,
+  newHeight: number,
+  shiftX: number,
+  shiftZ: number,
+): InteriorWall {
+  const oldMinX = -oldWidth / 2;
+  const oldMaxX = oldWidth / 2;
+  const oldMinZ = -oldHeight / 2;
+  const oldMaxZ = oldHeight / 2;
+  const newMinX = -newWidth / 2 + shiftX;
+  const newMaxX = newWidth / 2 + shiftX;
+  const newMinZ = -newHeight / 2 + shiftZ;
+  const newMaxZ = newHeight / 2 + shiftZ;
+  const tolerance = 0.08;
+  const resizePoint = (x: number, z: number): { x: number; z: number } => {
+    const point = { x: x + shiftX, z: z + shiftZ };
+    if (Math.abs(x - oldMinX) <= tolerance) point.x = newMinX;
+    else if (Math.abs(x - oldMaxX) <= tolerance) point.x = newMaxX;
+    if (Math.abs(z - oldMinZ) <= tolerance) point.z = newMinZ;
+    else if (Math.abs(z - oldMaxZ) <= tolerance) point.z = newMaxZ;
+    return point;
+  };
+  const start = resizePoint(wall.x1, wall.z1);
+  const end = resizePoint(wall.x2, wall.z2);
+  return { ...wall, x1: start.x, z1: start.z, x2: end.x, z2: end.z };
+}
+
 function normaliseBoundarySize(layout: RoomLayout): RoomLayout {
   const walls = layout.boundaryWalls;
   if (!walls || walls.length < 3) return layout;
@@ -695,7 +743,7 @@ function normaliseLayout(layout: RoomLayout): RoomLayout {
       ? [INITIAL_GROUND_FLOOR]
       : layout.floors.slice(0, MAX_FLOORS).map((floor) => ({
           ...floor,
-          floorColor: floor.floorColor || '#c9a57d',
+          floorColor: floor.floorColor || '#686d73',
           items: floor.items.map((item) => ({
             ...item,
             color: item.color || '#cbd5e1',

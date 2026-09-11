@@ -24,8 +24,6 @@ import { useWalkthrough } from './hooks/use-walkthrough';
 import {
   CAMERA_BRACKET_ARM,
   FURNITURE_CATALOG,
-  THREE_VIEW_MAX_DISTANCE,
-  THREE_VIEW_MIN_DISTANCE,
 } from './lib/constants';
 import { DEFAULT_DIGITAL_TWIN_LAYERS, type DigitalTwinLayerState } from './lib/digital-twin-layers';
 import { hasCollisions } from './lib/geometry';
@@ -88,7 +86,7 @@ function zoomCamera(
   const offset = camera.position.clone().sub(controls.target);
   const factor = direction === '+' ? 0.72 : 1.32;
   offset.multiplyScalar(factor);
-  const distance = Math.max(THREE_VIEW_MIN_DISTANCE, Math.min(THREE_VIEW_MAX_DISTANCE, offset.length()));
+  const distance = Math.max(controls.minDistance, Math.min(controls.maxDistance, offset.length()));
   offset.setLength(distance);
   camera.position.copy(controls.target).add(offset);
   controls.update();
@@ -120,7 +118,9 @@ const INITIAL_VIEW_SETTINGS: ViewSettings = {
   walkthroughMode: false,
   showOutdoor: false,
   showAllFloors: false,
-  wallDisplay: 'cutaway',
+  // Keep the complete room shell visible by default. Cutaway is an explicit
+  // inspection mode so camera-facing walls are not silently hidden.
+  wallDisplay: 'up',
   measurementMode: false,
   soundsEnabled: false,
   drawWallMode: false,
@@ -178,6 +178,7 @@ export function RoomOrganizer(): JSX.Element {
   const [selectedLiveDeviceId, setSelectedLiveDeviceId] = useState<string | null>(null);
   const [measurementPoints, setMeasurementPoints] = useState<ReadonlyArray<{ x: number; z: number }>>([]);
   const [wallDraft, setWallDraft] = useState<{ x: number; z: number } | null>(null);
+  const [wallChainStart, setWallChainStart] = useState<{ x: number; z: number } | null>(null);
   const [pointerWorld, setPointerWorld] = useState<{ x: number; z: number } | null>(null);
   useEffect(() => {
     if (!view.drawWallMode) return;
@@ -210,6 +211,7 @@ export function RoomOrganizer(): JSX.Element {
       point: pointerWorld,
       existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
       fromPoint: wallDraft,
+      closePoint: wallChainStart,
       roomWidth: layout.width,
       roomDepth: layout.height,
       // Generous visual/interaction snap makes joining a corner feel like a
@@ -217,7 +219,7 @@ export function RoomOrganizer(): JSX.Element {
       snapDistance: 0.65,
       clampToRoom: false,
     });
-  }, [view.drawWallMode, pointerWorld, activeFloor.interiorWalls, wallDraft, layout.width, layout.height]);
+  }, [view.drawWallMode, pointerWorld, activeFloor.interiorWalls, wallDraft, wallChainStart, layout.width, layout.height]);
 
   const highlightedIds = useMemo(() => {
     const normalised = catalogQuery.trim().toLowerCase();
@@ -248,12 +250,22 @@ export function RoomOrganizer(): JSX.Element {
   const collidingIds = useMemo(() => {
     const matches = new Set<string>();
     for (const item of activeFloor.items) {
-      if (hasCollisions(item, activeFloor.items, placementFootprint.width, placementFootprint.depth)) {
+      if (hasCollisions(item, activeFloor.items, placementFootprint.width, placementFootprint.depth, activeFloor.interiorWalls ?? [])) {
         matches.add(item.id);
       }
     }
     return matches;
   }, [activeFloor.items, placementFootprint]);
+
+  const collisionBoundaryWalls = useMemo(
+    () => layout.boundaryWalls?.length ? layout.boundaryWalls : [
+      { id: 'north', x1: -layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: -layout.height / 2 },
+      { id: 'east', x1: layout.width / 2, z1: -layout.height / 2, x2: layout.width / 2, z2: layout.height / 2 },
+      { id: 'south', x1: layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: layout.height / 2 },
+      { id: 'west', x1: -layout.width / 2, z1: layout.height / 2, x2: -layout.width / 2, z2: -layout.height / 2 },
+    ],
+    [layout.boundaryWalls, layout.width, layout.height]
+  );
 
   const handleEmptyClick = useCallback(
     (x: number, z: number, chainWall = true, snap = true, clampToRoom = snap) => {
@@ -262,6 +274,7 @@ export function RoomOrganizer(): JSX.Element {
           point: { x, z },
           existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
           fromPoint: wallDraft,
+          closePoint: wallChainStart,
           roomWidth: layout.width,
           roomDepth: layout.height,
           // 2D clicks should land exactly where the cursor is. The 3D
@@ -271,6 +284,7 @@ export function RoomOrganizer(): JSX.Element {
         });
         if (!wallDraft) {
           setWallDraft(snapped.point);
+          setWallChainStart(snapped.point);
           return;
         }
         // Reject zero-length walls (two clicks on the same vertex).
@@ -287,9 +301,14 @@ export function RoomOrganizer(): JSX.Element {
           x2: snapped.point.x,
           z2: snapped.point.z,
         });
+        const closesRoom = Boolean(
+          wallChainStart &&
+          Math.hypot(snapped.point.x - wallChainStart.x, snapped.point.z - wallChainStart.z) < 0.001
+        );
         // The 2D editor uses exactly two clicks per wall. The 3D workflow
         // keeps chaining from the last endpoint for quick room outlines.
-        setWallDraft(chainWall ? snapped.point : null);
+        setWallDraft(chainWall && !closesRoom ? snapped.point : null);
+        if (closesRoom || !chainWall) setWallChainStart(null);
         return;
       }
       if (view.measurementMode) {
@@ -303,6 +322,7 @@ export function RoomOrganizer(): JSX.Element {
       view.measurementMode,
       view.drawWallMode,
       wallDraft,
+      wallChainStart,
       actions,
       activeFloor.interiorWalls,
       layout.width,
@@ -534,6 +554,7 @@ export function RoomOrganizer(): JSX.Element {
   useEffect(() => {
     if (!view.drawWallMode) {
       setWallDraft(null);
+      setWallChainStart(null);
       setSelectedWall(null);
       setPointerWorld(null);
     }
@@ -543,6 +564,7 @@ export function RoomOrganizer(): JSX.Element {
   // the previous floor) and slide the camera target up/down to the new floor.
   useEffect(() => {
     setWallDraft(null);
+    setWallChainStart(null);
     setSelectedItemId(null);
     setSelectedWall(null);
     setExtraSelectedIds(new Set());
@@ -622,6 +644,14 @@ export function RoomOrganizer(): JSX.Element {
     [selectedItemId, extraSelectedIds, selectOnly]
   );
 
+  const selectAreaItems = useCallback((ids: string[]) => {
+    const available = new Set(activeFloor.items.map((item) => item.id));
+    const selected = ids.filter((id) => available.has(id));
+    setSelectedItemId(selected[0] ?? null);
+    setExtraSelectedIds(new Set(selected.slice(1)));
+    setSelectedWall(null);
+  }, [activeFloor.items]);
+
   const toggleLight = useCallback((id: string) => {
     const item = activeFloor.items.find((entry) => entry.id === id);
     if (!item) return;
@@ -652,6 +682,8 @@ export function RoomOrganizer(): JSX.Element {
     activeFloorIndex,
     roomWidth: placementFootprint.width,
     roomDepth: placementFootprint.depth,
+    interiorWalls: activeFloor.interiorWalls,
+    boundaryWalls: collisionBoundaryWalls,
     actions,
     allSelectedIds,
   });
@@ -846,6 +878,7 @@ export function RoomOrganizer(): JSX.Element {
   );
 
   const { snapPosition, getDragPlaneY, placeCatalogItem } = useItemPlacement({
+    boundaryWalls: collisionBoundaryWalls,
     activeFloor,
     activeFloorY,
     roomWidth: placementFootprint.width,
@@ -854,11 +887,15 @@ export function RoomOrganizer(): JSX.Element {
     view,
   });
 
+  const maxZoomDistance = Math.max(12, Math.hypot(placementFootprint.width, placementFootprint.depth) * 1.75);
+
   const { isReady, error, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, worldPositionFromClient } =
     useThreeScene({
       canvasRef,
+      maxZoomDistance,
       walkthroughActive,
       onItemSelect: handleSelect,
+      onAreaSelect: selectAreaItems,
       onLightToggle: toggleLight,
       onCurtainToggle: toggleCurtain,
       toggleLightOnSelect: gameMode === 'live',
@@ -959,6 +996,7 @@ export function RoomOrganizer(): JSX.Element {
     controlsRef,
     canvas2DRef,
     layout,
+    actions,
     activeFloor,
     activeFloorIndex,
     view,
@@ -1157,6 +1195,7 @@ export function RoomOrganizer(): JSX.Element {
       deselect: () => {
         if (wallDraft) {
           setWallDraft(null);
+          setWallChainStart(null);
           return;
         }
         setSelectedItemId(null);
@@ -1348,6 +1387,7 @@ export function RoomOrganizer(): JSX.Element {
           // drawing, so an existing wall can never win the click.
           view.view2D && !view.drawWallMode ? (
             <FloorPlanEditor
+              key={`${activeFloor.id}:${activeFloor.items.map((item) => item.id).join('|')}`}
               layout={layout}
               floor={activeFloor}
               selectedWallId={selectedWall?.id ?? null}
@@ -1370,6 +1410,7 @@ export function RoomOrganizer(): JSX.Element {
                   setExtraSelectedIds(new Set());
                 }
               }}
+              onAreaSelect={selectAreaItems}
               onWheel={handle2DWheel}
               onResizePan={(x, y) => setPlanCamera((current) => ({ ...current, panX: current.panX + x, panY: current.panY + y }))}
               wallDraft={wallDraft}
@@ -1592,7 +1633,8 @@ export function RoomOrganizer(): JSX.Element {
             selectedItem,
             activeFloor.items,
             placementFootprint.width,
-            placementFootprint.depth
+            placementFootprint.depth,
+            activeFloor.interiorWalls ?? []
           )}
           onRotate={(id: string) => {
             rotateItemHandler(id);

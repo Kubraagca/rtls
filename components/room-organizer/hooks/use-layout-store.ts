@@ -114,7 +114,7 @@ export const layoutStore = createStore<LayoutStoreState>()((set) => {
       const id = nextId('floor');
       dispatch({
         type: 'addFloor',
-        floor: { id, items: [], floorColor: '#c9a57d', floorPattern: 'wood' },
+        floor: { id, items: [], floorColor: '#686d73', floorPattern: 'concrete' },
       });
       return id;
     },

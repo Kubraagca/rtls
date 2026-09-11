@@ -25,7 +25,7 @@ export function openBlueprintPrintWindow(layout: RoomLayout, floor: FloorLayout)
     selectedItemId: null,
     showMeasurements: true,
     showWiFiSignals: false,
-    hasCollision: (item) => hasCollisions(item, floor.items, layout.width, layout.height),
+    hasCollision: (item) => hasCollisions(item, floor.items, layout.width, layout.height, floor.interiorWalls ?? []),
   });
 
   const dataUrl = canvas.toDataURL('image/png');

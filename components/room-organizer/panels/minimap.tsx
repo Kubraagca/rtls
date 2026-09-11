@@ -31,7 +31,7 @@ export function Minimap({ layout, floor, selectedItemId }: MinimapProps): JSX.El
         selectedItemId,
         showMeasurements: false,
         showWiFiSignals: false,
-        hasCollision: (item) => hasCollisions(item, floor.items, layout.width, layout.height),
+        hasCollision: (item) => hasCollisions(item, floor.items, layout.width, layout.height, floor.interiorWalls ?? []),
         padding: MINIMAP_PADDING,
       });
     paint();

@@ -68,7 +68,7 @@ const FLOOR_PALETTES: readonly SwatchGroup[] = [
   },
 ];
 
-const DEFAULT_FLOOR_COLOR = '#c9a57d';
+const DEFAULT_FLOOR_COLOR = '#686d73';
 
 // ============================================================================
 // Apply-to + active-tab state

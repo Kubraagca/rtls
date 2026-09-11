@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState, type MutableRefObject } from 'react';
-import { THREE_VIEW_MAX_DISTANCE, THREE_VIEW_MIN_DISTANCE } from '../lib/constants';
 import { Icon, type PlotcraftIconName } from '../plotcraft/icon';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -57,7 +56,7 @@ export function TouchModeToggle({ controlsRef, isReady, onFit }: TouchModeToggle
     const camera = controls.object;
     const offset = camera.position.clone().sub(controls.target);
     offset.multiplyScalar(direction === '+' ? 0.75 : 1.3);
-    offset.setLength(Math.max(THREE_VIEW_MIN_DISTANCE, Math.min(THREE_VIEW_MAX_DISTANCE, offset.length())));
+    offset.setLength(Math.max(controls.minDistance, Math.min(controls.maxDistance, offset.length())));
     camera.position.copy(controls.target).add(offset);
     controls.update();
   };

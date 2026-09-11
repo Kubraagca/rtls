@@ -92,6 +92,7 @@ interface AvatarObstacle {
   halfWidth: number;
   halfDepth: number;
   rotation: number;
+  isSeat: boolean;
 }
 
 interface FullAvatarSlot {
@@ -562,8 +563,8 @@ function stepSimulation(
           npc.position.z = sideZ;
         }
       } else {
-        const movedX = !avatarPositionBlocked(nextX, npc.position.z, obstacles);
-        const movedZ = !avatarPositionBlocked(npc.position.x, nextZ, obstacles);
+        const movedX = !avatarMovementBlocked(npc, nextX, npc.position.z, obstacles);
+        const movedZ = !avatarMovementBlocked(npc, npc.position.x, nextZ, obstacles);
         if (movedX) npc.position.x = nextX;
         if (movedZ) npc.position.z = nextZ;
       }
@@ -588,7 +589,8 @@ function stepSimulation(
             npc.target,
             obstacles,
             halfW,
-            halfD
+            halfD,
+            npc.targetKind === 'desk'
           );
           if (route.length > 1) {
             npc.navigationPath = route.slice(1);
@@ -797,6 +799,7 @@ function buildAvatarObstacles(items: readonly FurnitureItem[]): AvatarObstacle[]
       halfWidth: Math.max(0.08, item.width / 2),
       halfDepth: Math.max(0.08, item.depth / 2),
       rotation: item.rotation ?? 0,
+      isSeat: isAvatarSeat(item.type),
     }));
 }
 
@@ -809,8 +812,39 @@ function isNonBlockingAvatarItem(type: string): boolean {
     || type === 'rtls-gateway'
     || type === 'rtls-beacon'
     || type === 'wifi'
-    || type === 'security-camera'
-    || isAvatarSeat(type);
+    || type === 'security-camera';
+}
+
+function avatarMovementBlocked(
+  npc: NpcState,
+  x: number,
+  z: number,
+  obstacles: readonly AvatarObstacle[]
+): boolean {
+  // A seat is solid while walking, except for the selected target's small
+  // approach zone. This also handles chairs tucked under a desk: the avatar
+  // can complete the final approach without making every desk non-solid.
+  if (npc.targetKind === 'desk') {
+    return avatarPositionBlocked(
+      x,
+      z,
+      obstacles.filter((obstacle) => !isTargetApproachObstacle(obstacle, npc.target, x, z))
+    );
+  }
+  return avatarPositionBlocked(x, z, obstacles);
+}
+
+function isTargetApproachObstacle(
+  obstacle: AvatarObstacle,
+  target: { x: number; z: number },
+  x: number,
+  z: number
+): boolean {
+  const targetIsThisSeat = obstacle.isSeat
+    && Math.hypot(obstacle.x - target.x, obstacle.z - target.z) <= 0.12;
+  const nearTarget = Math.hypot(x - target.x, z - target.z) <= 0.90;
+  const obstacleNearTarget = Math.hypot(obstacle.x - target.x, obstacle.z - target.z) <= 1.00;
+  return targetIsThisSeat || (nearTarget && obstacleNearTarget);
 }
 
 function avatarPositionBlocked(x: number, z: number, obstacles: readonly AvatarObstacle[]): boolean {
@@ -845,7 +879,8 @@ function buildAvatarRoute(
   target: { x: number; z: number },
   obstacles: readonly AvatarObstacle[],
   halfW: number,
-  halfD: number
+  halfD: number,
+  allowSeatTarget: boolean
 ): Array<{ x: number; z: number }> {
   const margin = AVATAR_COLLISION_RADIUS + 0.035;
   const nodes: Array<{ x: number; z: number }> = [start, target];
@@ -896,7 +931,12 @@ function buildAvatarRoute(
     if (current === 1) break;
 
     for (let next = 0; next < nodes.length; next += 1) {
-      if (visited.has(next) || !isAvatarSegmentClear(nodes[current]!, nodes[next]!, relevantObstacles)) continue;
+      if (visited.has(next) || !isAvatarSegmentClear(
+        nodes[current]!,
+        nodes[next]!,
+        relevantObstacles,
+        next === 1 && allowSeatTarget ? target : undefined
+      )) continue;
       const dx = nodes[current]!.x - nodes[next]!.x;
       const dz = nodes[current]!.z - nodes[next]!.z;
       const distance = Math.hypot(dx, dz);
@@ -920,7 +960,8 @@ function buildAvatarRoute(
 function isAvatarSegmentClear(
   start: { x: number; z: number },
   end: { x: number; z: number },
-  obstacles: readonly AvatarObstacle[]
+  obstacles: readonly AvatarObstacle[],
+  seatTarget?: { x: number; z: number }
 ): boolean {
   const distance = Math.hypot(end.x - start.x, end.z - start.z);
   const samples = Math.max(2, Math.ceil(distance / 0.12));
@@ -928,7 +969,15 @@ function isAvatarSegmentClear(
     const t = index / samples;
     const x = start.x + (end.x - start.x) * t;
     const z = start.z + (end.z - start.z) * t;
-    if (avatarPositionBlocked(x, z, obstacles)) return false;
+    const blockingObstacles = seatTarget
+      ? obstacles.filter((obstacle) => !isTargetApproachObstacle(
+        obstacle,
+        seatTarget,
+        end.x,
+        end.z
+      ))
+      : obstacles;
+    if (avatarPositionBlocked(x, z, blockingObstacles)) return false;
   }
   return true;
 }

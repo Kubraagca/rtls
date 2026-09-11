@@ -37,7 +37,7 @@ export interface OpeningSnap {
  * centreline would bury a wall-mounted item's back face half that depth inside
  * the wall, so seating against an interior wall adds this half-thickness.
  */
-const INTERIOR_WALL_HALF_THICKNESS = 0.08;
+const WALL_HALF_THICKNESS = 0.08;
 
 export interface SnapOpeningOptions {
   position: { x: number; z: number };
@@ -45,6 +45,7 @@ export interface SnapOpeningOptions {
   roomWidth: number;
   roomDepth: number;
   interiorWalls?: readonly InteriorWall[];
+  boundaryWalls?: readonly InteriorWall[];
 }
 
 export function snapOpeningToWall(options: SnapOpeningOptions): OpeningSnap {
@@ -83,6 +84,16 @@ export function snapOpeningToWall(options: SnapOpeningOptions): OpeningSnap {
     },
   ];
 
+  if (options.boundaryWalls?.length) {
+    const actual: Candidate[] = [];
+    for (const wall of options.boundaryWalls) {
+      const projected = projectOntoSegment(position, wall, half);
+      if (!projected) continue;
+      actual.push({ position: projected.point, rotation: -Math.atan2(wall.z2 - wall.z1, wall.x2 - wall.x1),
+        wallKind: 'exterior', distance: projected.distance });
+    }
+    if (actual.length) candidates.splice(0, candidates.length, ...actual);
+  }
   for (const wall of interiorWalls) {
     const projected = projectOntoSegment(position, wall, half);
     if (!projected) continue;
@@ -155,6 +166,13 @@ export function isOpening(type: string): boolean {
   return type === 'door' || type === 'window';
 }
 
+const WALL_PASS_THROUGH_TYPES = new Set(['elevator', 'lift', 'asansor', 'asansör']);
+
+/** Structural items that are allowed to cross a wall while being positioned. */
+export function isWallPassThrough(type: string): boolean {
+  return WALL_PASS_THROUGH_TYPES.has(type.toLowerCase());
+}
+
 
 /**
  * Items that belong flush against a wall. Openings (doors/windows) cut through
@@ -180,11 +198,12 @@ export function snapWallMountedItem(options: SnapOpeningOptions & { itemDepth: n
   // sign is +1. For an interior wall it's an arbitrary normal, so seat the item
   // on whichever side the cursor dropped and inset past the wall half-thickness
   // so the back face rests on the surface instead of the centreline.
-  let inset = options.itemDepth / 2 + 0.02;
+  // Move the camera past the wall's inner face. Without the half-thickness
+  // offset, the camera body intersects exterior walls at oblique angles.
+  let inset = options.itemDepth / 2 + 0.02 + WALL_HALF_THICKNESS;
   let side: 1 | -1 = 1;
   if (snap.wallKind === 'interior' && snap.interiorWall) {
     side = interiorWallSide(options.position, snap.interiorWall);
-    inset += INTERIOR_WALL_HALF_THICKNESS;
   }
   const forwardX = Math.sin(snap.rotation) * side;
   const forwardZ = Math.cos(snap.rotation) * side;
@@ -234,7 +253,7 @@ export function reseatWallMountedItem(
   const side = facingX * inwardX + facingZ * inwardZ >= 0 ? 1 : -1;
   // Interior walls are thick; inset past the half-thickness so the back face
   // rests on the surface rather than embedding into the centreline.
-  const inset = options.itemDepth / 2 + 0.02 + (isInterior ? INTERIOR_WALL_HALF_THICKNESS : 0);
+  const inset = options.itemDepth / 2 + 0.02 + WALL_HALF_THICKNESS;
   return {
     x: snap.position.x + inwardX * side * inset,
     z: snap.position.z + inwardZ * side * inset,
@@ -266,10 +285,12 @@ export function settleWallMountedItem(
   position: { x: number; z: number },
   roomWidth: number,
   roomDepth: number,
-  interiorWalls: readonly InteriorWall[] = []
+  interiorWalls: readonly InteriorWall[] = [],
+  boundaryWalls: readonly InteriorWall[] = []
 ): SettledPlacement | null {
   if (isOpening(item.type)) {
     const snapped = snapOpeningToWall({
+      boundaryWalls,
       position,
       itemWidth: item.width,
       roomWidth,

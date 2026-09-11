@@ -36,6 +36,7 @@ export function useLayoutPersistence({
   const hydrationBaseRef = useRef<RoomLayout | null>(null);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  const persistedFloorCountRef = useRef(layout.floors.length);
   const pendingRef = useRef(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -80,17 +81,15 @@ export function useLayoutPersistence({
     const saved = loadLayout();
     // The former default was an empty layout named "My Home". Do not let that
     // old starter save hide the new populated office starter project.
-    const isLegacyEmptyStarter = Boolean(
-      saved &&
-      (saved.name === 'My Home' || saved.name === 'Office Project') &&
-      saved.floors.every((floor) => floor.items.length === 0)
-    );
     const isOlderOfficeDemoStarter = Boolean(
       saved &&
       saved.name === 'RTLS Ofis - Demo Katı' &&
       !saved.floors.some((floor) => floor.items.some((item) => item.id === 'water-cooler-1' || item.id === 'locker-1'))
     );
-    if (saved && !isLegacyEmptyStarter && !isOlderOfficeDemoStarter) {
+    void isOlderOfficeDemoStarter;
+    // A schema-valid saved layout is user data, including edited demo layouts
+    // with additional floors. Never discard it based on its display name.
+    if (saved) {
       hydrationBaseRef.current = layout;
       // As above: a stored layout that parses but throws on apply must not
       // white-screen mount.
@@ -117,6 +116,19 @@ export function useLayoutPersistence({
       hydrationBaseRef.current = null;
       return;
     }
+    // Floor creation/removal is structural data. Persist it immediately so a
+    // refresh cannot land inside the normal debounce window and restore the
+    // previous one-floor layout.
+    if (layout.floors.length !== persistedFloorCountRef.current) {
+      persistedFloorCountRef.current = layout.floors.length;
+      const ok = saveLayout(layout);
+      pendingRef.current = !ok;
+      setSaving(!ok);
+      setSaveError(!ok);
+      if (ok) setLastSavedAt(Date.now());
+      return;
+    }
+    persistedFloorCountRef.current = layout.floors.length;
     setSaving(true);
     pendingRef.current = true;
     const handle = window.setTimeout(() => {

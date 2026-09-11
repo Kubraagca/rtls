@@ -38,6 +38,25 @@ describe('layoutReducer — building properties', () => {
     expect(Number.isFinite(state.layout.height)).toBe(true);
     expect(state.layout.height).toBeGreaterThan(0);
   });
+
+  it('keeps interior wall endpoints attached when the room is resized', () => {
+    const state: LayoutState = {
+      layout: makeLayout({
+        width: 10,
+        height: 8,
+        floors: [makeFloor({
+          interiorWalls: [{ id: 'partition', x1: -2, z1: -4, x2: 2, z2: 0 }],
+        })],
+      }),
+      activeFloorIndex: 0,
+    };
+    const resized = layoutReducer(state, {
+      type: 'resizeRoom', width: 10, height: 12, shiftX: 0, shiftZ: 0,
+    });
+    expect(resized.layout.floors[0]!.interiorWalls![0]).toMatchObject({
+      x1: -2, z1: -6, x2: 2, z2: 0,
+    });
+  });
 });
 
 describe('layoutReducer — item CRUD', () => {
@@ -128,14 +147,30 @@ describe('layoutReducer — item CRUD', () => {
     expect(activeItems(state)[0]!.rotation).toBeCloseTo(0, 10);
   });
 
-  it('moveItem sets an absolute position', () => {
+  it('moveItem sets an absolute position inside the walls', () => {
     const state = layoutReducer(stateWith([makeItem({ id: 'a' })]), {
       type: 'moveItem',
       id: 'a',
-      x: 5,
+      x: 2,
       z: -3,
     });
-    expect(activeItems(state)[0]!.position).toEqual({ x: 5, z: -3 });
+    expect(activeItems(state)[0]!.position).toEqual({ x: 2, z: -3 });
+  });
+
+  it('moveItem allows furniture to cross the exterior wall boundary', () => {
+    for (const position of [{ x: 6, z: 0 }, { x: -6, z: 0 }, { x: 0, z: 6 }, { x: 0, z: -6 }]) {
+      const state = stateWith([makeItem({ id: 'a' })]);
+      state.layout.boundaryWalls = [];
+      const next = layoutReducer(state, { type: 'moveItem', id: 'a', ...position });
+      expect(activeItems(next)[0]!.position).toEqual(position);
+    }
+  });
+
+  it('moveItem allows furniture to cross an interior wall', () => {
+    const state = stateWith([makeItem({ id: 'a', position: { x: -2, z: 0 } })]);
+    state.layout.floors[0]!.interiorWalls = [{ id: 'partition', x1: 0, z1: -4, x2: 0, z2: 4 }];
+    const next = layoutReducer(state, { type: 'moveItem', id: 'a', x: 2, z: 0 });
+    expect(activeItems(next)[0]!.position).toEqual({ x: 2, z: 0 });
   });
 
   it('resizeItem clamps to a 0.1 minimum', () => {
@@ -601,7 +636,7 @@ describe('layoutReducer — applyLayout', () => {
     const state: LayoutState = { layout: makeLayout(), activeFloorIndex: 0 };
     const applied = layoutReducer(state, { type: 'applyLayout', layout: makeLayout({ floors }) });
     expect(applied.layout.floors).toHaveLength(MAX_FLOORS);
-    expect(applied.layout.floors[0]!.floorColor).toBe('#c9a57d');
+    expect(applied.layout.floors[0]!.floorColor).toBe('#686d73');
   });
 
   it('replaces an empty floors array with a default ground floor', () => {

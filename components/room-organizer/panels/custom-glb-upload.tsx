@@ -11,6 +11,8 @@ interface PreviewInfo extends CustomGlbInspection {
   width: number;
   depth: number;
   height: number;
+  collisionWidth: number;
+  collisionDepth: number;
 }
 
 export interface CustomGlbUploadProps {
@@ -150,6 +152,8 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
         customModelFileName: fileName,
         customModelBytes: data.byteLength,
         customThumbnail: thumbnailDataUrl,
+        collisionWidth: preview.collisionWidth,
+        collisionDepth: preview.collisionDepth,
       } as CatalogItem;
       registerCatalogItem(catalogItem);
       onAdd(catalogItem);

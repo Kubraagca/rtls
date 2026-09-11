@@ -108,6 +108,9 @@ export interface FurnitureItem {
   width: number;
   depth: number;
   height: number;
+  /** Optional tight X/Z footprint used for collision only (mainly GLB assets). */
+  collisionWidth?: number;
+  collisionDepth?: number;
   color: string;
   icon: string;
   /** Price in §, kept on the item so layouts persist their value even if the catalog changes. */

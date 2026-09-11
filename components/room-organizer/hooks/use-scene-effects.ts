@@ -9,7 +9,7 @@ import { useCatalogRegistry } from '../lib/catalog-registry';
 import { FLOOR_HEIGHT_METERS } from '../lib/types';
 import { disposeObject, removeAndDispose } from '../three/builder-utils';
 import { addVisionCones } from '../three/camera-vision';
-import { fitStoredCustomGltfAsset, loadStoredCustomGltfAsset } from '../three/custom-gltf-assets';
+import { fitStoredCustomGltfAsset, loadStoredCustomGltfAsset, measureCollisionFootprint } from '../three/custom-gltf-assets';
 import { FURNITURE_REVISION_KEY } from '../three/drag-handlers';
 import { createFurnitureModel } from '../three/furniture-builders';
 import {
@@ -18,7 +18,7 @@ import {
   renderInteriorWalls,
   renderInteriorWallPreview,
 } from '../three/interior-walls';
-import { clearRoomFloorZones, findClosedFloorLoops, renderRoomFloorZones } from '../three/room-floor-zones';
+import { clearRoomFloorZones, renderRoomFloorZones } from '../three/room-floor-zones';
 import { clearItemLabels, renderItemLabels } from '../three/item-labels';
 import { applyTimeOfDay, isLightItemType } from '../three/lighting';
 import { clearMeasurement, renderMeasurement } from '../three/measurement';
@@ -34,6 +34,7 @@ import { addSignalOverlays } from '../three/signal-overlay';
 import { computeFloorOpenings, computeWallOpenings } from '../three/wall-openings';
 import type { DigitalTwinLayerState } from '../lib/digital-twin-layers';
 import type { FloorLayout, FurnitureItem, InteriorWall, RoomLayout, ViewSettings } from '../lib/types';
+import type { LayoutActions } from './use-layout-state';
 import type * as ThreeNS from 'three';
 
 const GLTF_ASSET_PATHS: Record<string, string> = {
@@ -110,36 +111,18 @@ function exteriorOpeningAttachment(
 
 type PlanPoint = { x: number; z: number };
 
-function polygonArea(points: readonly PlanPoint[]): number {
-  return points.reduce((sum, point, index) => {
-    const next = points[(index + 1) % points.length]!;
-    return sum + point.x * next.z - next.x * point.z;
-  }, 0) / 2;
-}
-
 /**
  * The persisted boundary is the room that was created first. A later attached
  * room is stored as drawn walls, so it must be folded into the exterior shell
  * once those walls close a larger outline. This returns that outermost closed
  * contour rather than blindly reusing the first room's rectangle.
  */
-function outerBoundaryForFloor(layout: RoomLayout, floor: FloorLayout): InteriorWall[] {
-  const source = [...(layout.boundaryWalls ?? []), ...(floor.interiorWalls ?? [])];
-  const loops = findClosedFloorLoops(source);
-  if (loops.length === 0) return layout.boundaryWalls ?? [];
-  const outer = loops.reduce((largest, loop) =>
-    Math.abs(polygonArea(loop)) > Math.abs(polygonArea(largest)) ? loop : largest
-  );
-  return outer.map((point, index) => {
-    const next = outer[(index + 1) % outer.length]!;
-    return {
-      id: `outer-boundary-${index}`,
-      x1: point.x,
-      z1: point.z,
-      x2: next.x,
-      z2: next.z,
-    };
-  });
+function outerBoundaryForFloor(layout: RoomLayout): InteriorWall[] {
+  // A newly drawn/open room is an annex to the original shell. Do not promote
+  // its inferred floor loop to the building boundary: doing so replaces the
+  // original room's walls and floor. Only an explicitly persisted boundary is
+  // allowed to replace the default rectangular shell.
+  return layout.boundaryWalls ?? [];
 }
 
 function pointOnWall(point: PlanPoint, wall: InteriorWall, tolerance = 0.2): boolean {
@@ -277,6 +260,7 @@ export interface UseSceneEffectsParams {
   controlsRef: MutableRefObject<import('three/examples/jsm/controls/OrbitControls.js').OrbitControls | null>;
   canvas2DRef: RefObject<HTMLCanvasElement | null>;
   layout: RoomLayout;
+  actions: LayoutActions;
   activeFloor: FloorLayout;
   activeFloorIndex: number;
   view: ViewSettings;
@@ -306,6 +290,7 @@ export function useSceneEffects({
   controlsRef,
   canvas2DRef,
   layout,
+  actions,
   activeFloor,
   activeFloorIndex,
   view,
@@ -441,7 +426,7 @@ export function useSceneEffects({
 
     for (const { floor, index } of floorsToRender) {
       const isActive = index === activeFloorIndex;
-      const exteriorBoundary = outerBoundaryForFloor(layout, floor);
+      const exteriorBoundary = outerBoundaryForFloor(layout);
       const wallOpenings = computeWallOpenings(
         floor.items,
         layout.width,
@@ -632,6 +617,19 @@ export function useSceneEffects({
               disposeObject(child);
             }
             group.add(fitStoredCustomGltfAsset(THREE, source, modelItem));
+            if (isActive) {
+              const collision = measureCollisionFootprint(THREE, source, item);
+              // Re-measure legacy GLB placements too: older saved layouts may
+              // contain an oversized collision box from the pre-filter model.
+              if (
+                item.collisionWidth === undefined
+                || item.collisionDepth === undefined
+                || Math.abs(item.collisionWidth - collision.collisionWidth) > 0.005
+                || Math.abs(item.collisionDepth - collision.collisionDepth) > 0.005
+              ) {
+                actions.updateItem(item.id, collision);
+              }
+            }
             invalidate();
             requestShadowUpdate();
           });
@@ -688,6 +686,17 @@ export function useSceneEffects({
                 disposeObject(child);
               }
               group.add(fitGltfAsset(THREE, source, modelItem));
+              if (isActive) {
+                const collision = measureCollisionFootprint(THREE, source, item);
+                if (
+                  item.collisionWidth === undefined
+                  || item.collisionDepth === undefined
+                  || Math.abs((item.collisionWidth ?? 0) - collision.collisionWidth) > 0.005
+                  || Math.abs((item.collisionDepth ?? 0) - collision.collisionDepth) > 0.005
+                ) {
+                  actions.updateItem(item.id, collision);
+                }
+              }
               invalidate();
               requestShadowUpdate();
             });
@@ -718,7 +727,7 @@ export function useSceneEffects({
   }, [
     isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef,
     layout.floors, layout.width, layout.height, layout.boundaryWalls,
-    activeFloor, activeFloorIndex, view.showAllFloors, view.lightsEnabled, view.wallDisplay, digitalTwinLiveMode, catalog,
+    activeFloor, activeFloorIndex, view.showAllFloors, view.lightsEnabled, view.wallDisplay, digitalTwinLiveMode, catalog, actions,
   ]);
 
   // Selection / highlight outlines. Kept out of the furniture effect above so
@@ -911,7 +920,7 @@ export function useSceneEffects({
       : [{ floor: activeFloor, index: activeFloorIndex }];
 
     for (const { floor, index } of floorsToRender) {
-      const exteriorBoundary = outerBoundaryForFloor(layout, floor);
+      const exteriorBoundary = outerBoundaryForFloor(layout);
       const walls = interiorWallsForFloor(layout, floor, exteriorBoundary);
       const isActive = index === activeFloorIndex;
       if (walls.length > 0) {
@@ -932,7 +941,10 @@ export function useSceneEffects({
         roomWidth: layout.width,
         roomDepth: layout.height,
         ghostOpacity: view.showAllFloors && !isActive ? 0.10 : undefined,
-        skipLargestLoop: Boolean(layout.boundaryWalls?.length),
+        // Keep the base room floor and render every discovered room zone on
+        // top of it. The largest loop is not always the original room when an
+        // annex is drawn outside the initial footprint.
+        skipLargestLoop: false,
       });
     }
     // Interior walls cast shadows — recompute the static shadow map after any
@@ -1048,7 +1060,7 @@ export function useSceneEffects({
       return;
     }
 
-    const exteriorBoundary = outerBoundaryForFloor(layout, activeFloor);
+    const exteriorBoundary = outerBoundaryForFloor(layout);
     buildRoof(THREE, {
       scene,
       width: layout.width,
@@ -1109,7 +1121,7 @@ export function useSceneEffects({
         showPaths: digitalTwinLayers?.paths ?? false,
         showDigitalTwinLabels: digitalTwinLayers?.labels ?? false,
         trackedDevices: digitalTwinLayers?.devices ? digitalTwinDevices : undefined,
-        hasCollision: (item) => hasCollisions(item, visibleActiveFloor.items, placementFootprint.width, placementFootprint.depth),
+        hasCollision: (item) => hasCollisions(item, visibleActiveFloor.items, placementFootprint.width, placementFootprint.depth, visibleActiveFloor.interiorWalls ?? []),
         zoom: planZoom,
         panX: planPanX,
         panY: planPanY,

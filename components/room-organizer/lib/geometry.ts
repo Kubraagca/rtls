@@ -1,8 +1,22 @@
-import { isWallMounted } from './opening-snap';
-import type { FurnitureItem, Vec2 } from './types';
+import { isWallMounted, isWallPassThrough } from './opening-snap';
+import type { FurnitureItem, InteriorWall, RoomLayout, Vec2 } from './types';
 
-export function boundingRadius(item: Pick<FurnitureItem, 'width' | 'depth'>): number {
-  return Math.hypot(item.width / 2, item.depth / 2);
+// A tiny visual-fit tolerance keeps adjacent furniture from getting stuck on
+// floating-point/model-export edges. It is deliberately much smaller than a
+// furniture footprint, so genuine overlaps still collide.
+const COLLISION_EDGE_TOLERANCE = 0.015;
+
+function collisionDimensions(item: Pick<FurnitureItem, 'width' | 'depth' | 'collisionWidth' | 'collisionDepth'>): { width: number; depth: number } {
+  return {
+    width: Math.max(0.01, (item.collisionWidth ?? item.width) - COLLISION_EDGE_TOLERANCE),
+    depth: Math.max(0.01, (item.collisionDepth ?? item.depth) - COLLISION_EDGE_TOLERANCE),
+  };
+}
+
+export function boundingRadius(item: Pick<FurnitureItem, 'width' | 'depth' | 'collisionWidth' | 'collisionDepth'>): number {
+  const width = item.collisionWidth ?? item.width;
+  const depth = item.collisionDepth ?? item.depth;
+  return Math.hypot(width / 2, depth / 2);
 }
 
 /**
@@ -51,11 +65,12 @@ function toObb(item: FurnitureItem): Obb {
   const rotation = item.rotation ?? 0;
   const cos = Math.cos(rotation);
   const sin = Math.sin(rotation);
+  const dimensions = collisionDimensions(item);
   return {
     cx: item.position?.x ?? 0,
     cz: item.position?.z ?? 0,
-    hw: item.width / 2,
-    hd: item.depth / 2,
+    hw: dimensions.width / 2,
+    hd: dimensions.depth / 2,
     // Three's rotY maps the local +X axis to (cosθ, −sinθ) in world XZ, so the
     // width axis is (cos, −sin) and the depth axis is (sin, cos).
     ax: cos,
@@ -86,10 +101,99 @@ function obbOverlap(a: Obb, b: Obb): boolean {
   return true;
 }
 
+const WALL_THICKNESS = 0.16;
+
+export function collisionWalls(layout: RoomLayout, interiorWalls: readonly InteriorWall[] = []): InteriorWall[] {
+  const w = layout.width / 2;
+  const d = layout.height / 2;
+  const boundary = layout.boundaryWalls?.length ? layout.boundaryWalls : [
+    { id: 'north', x1: -w, z1: -d, x2: w, z2: -d },
+    { id: 'east', x1: w, z1: -d, x2: w, z2: d },
+    { id: 'south', x1: w, z1: d, x2: -w, z2: d },
+    { id: 'west', x1: -w, z1: d, x2: -w, z2: -d },
+  ];
+  return [...boundary, ...interiorWalls];
+}
+
+/** Continuous SAT: test the entire translation, even if one pointer event
+ * jumps from one side of a thin wall to the other. */
+export function movementCrossesWall(item: FurnitureItem, destination: Vec2, walls: readonly InteriorWall[]): boolean {
+  if (!item.position || isWallMounted(item.type) || isWallPassThrough(item.type)) return false;
+  if (![destination.x, destination.z].every(Number.isFinite)) return true;
+  const a = toObb(item);
+  const vx = destination.x - a.cx;
+  const vz = destination.z - a.cz;
+  if (Math.hypot(vx, vz) < 1e-9) return false;
+  return walls.some((wall) => {
+    const b = wallAsObb(wall);
+    if (!b) return false;
+    // Furniture intentionally sits very close to wall faces, so its starting
+    // footprint may already touch the wall's thickness. In that case only a
+    // move deeper into the wall or through to the other side is blocked;
+    // moving away/along the wall must remain possible.
+    if (obbOverlap(a, b)) {
+      const startNormal = (a.cx - b.cx) * b.bx + (a.cz - b.cz) * b.bz;
+      const endX = a.cx + vx;
+      const endZ = a.cz + vz;
+      const endNormal = (endX - b.cx) * b.bx + (endZ - b.cz) * b.bz;
+      if (startNormal * endNormal < -1e-8 || Math.abs(endNormal) < Math.abs(startNormal) - 1e-8) return true;
+      return false;
+    }
+    let enter = 0;
+    let leave = 1;
+    for (const [x, z] of [[a.ax, a.az], [a.bx, a.bz], [b.ax, b.az], [b.bx, b.bz]] as const) {
+      const radius = a.hw * Math.abs(a.ax * x + a.az * z) + a.hd * Math.abs(a.bx * x + a.bz * z)
+        + b.hw * Math.abs(b.ax * x + b.az * z) + b.hd * Math.abs(b.bx * x + b.bz * z);
+      const start = (a.cx - b.cx) * x + (a.cz - b.cz) * z;
+      const speed = vx * x + vz * z;
+      if (Math.abs(speed) < 1e-10) {
+        if (Math.abs(start) >= radius - 1e-8) return false;
+      } else {
+        const t1 = (-radius - start) / speed;
+        const t2 = (radius - start) / speed;
+        enter = Math.max(enter, Math.min(t1, t2));
+        leave = Math.min(leave, Math.max(t1, t2));
+        if (enter >= leave - 1e-8) return false;
+      }
+    }
+    return enter < leave - 1e-8;
+  });
+}
+
+function wallAsObb(wall: InteriorWall): Obb | null {
+  const dx = wall.x2 - wall.x1;
+  const dz = wall.z2 - wall.z1;
+  const length = Math.hypot(dx, dz);
+  if (length < 0.0001) return null;
+  return {
+    cx: (wall.x1 + wall.x2) / 2,
+    cz: (wall.z1 + wall.z2) / 2,
+    hw: length / 2,
+    hd: WALL_THICKNESS / 2,
+    ax: dx / length,
+    az: dz / length,
+    bx: -dz / length,
+    bz: dx / length,
+  };
+}
+
+function crossesWall(item: FurnitureItem, walls: readonly InteriorWall[]): boolean {
+  const itemObb = toObb(item);
+  return walls.some((wall) => {
+    const wallObb = wallAsObb(wall);
+    return wallObb ? obbOverlap(itemObb, wallObb) : false;
+  });
+}
+
 export function itemInBounds(item: FurnitureItem, roomWidth: number, roomDepth: number): boolean {
   if (!item.position) return false;
   // Rotation-aware AABB of the item's oriented footprint.
-  const { halfW, halfD } = rotatedHalfExtents(item);
+  const dimensions = collisionDimensions(item);
+  const rotation = item.rotation ?? 0;
+  const cos = Math.abs(Math.cos(rotation));
+  const sin = Math.abs(Math.sin(rotation));
+  const halfW = (dimensions.width * cos + dimensions.depth * sin) / 2;
+  const halfD = (dimensions.width * sin + dimensions.depth * cos) / 2;
   return (
     item.position.x - halfW >= -roomWidth / 2 &&
     item.position.x + halfW <= roomWidth / 2 &&
@@ -161,7 +265,9 @@ export function hasCollisions(
   item: FurnitureItem,
   allItems: readonly FurnitureItem[],
   roomWidth: number,
-  roomDepth: number
+  roomDepth: number,
+  interiorWalls: readonly InteriorWall[] = [],
+  boundaryWalls: readonly InteriorWall[] = []
 ): boolean {
   if (!item.position) return false;
   const overlapsAnother = (): boolean =>
@@ -178,6 +284,7 @@ export function hasCollisions(
     return overlapsAnother();
   }
   if (!itemInBounds(item, roomWidth, roomDepth)) return true;
+  if (!isWallPassThrough(item.type) && crossesWall(item, [...interiorWalls, ...boundaryWalls])) return true;
   return overlapsAnother();
 }
 

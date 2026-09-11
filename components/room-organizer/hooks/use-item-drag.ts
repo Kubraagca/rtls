@@ -1,6 +1,6 @@
 import { useCallback, useRef, type MutableRefObject } from 'react';
 import { hasCollisions } from '../lib/geometry';
-import { settleWallMountedItem } from '../lib/opening-snap';
+import { isOpening, snapOpeningToWall, settleWallMountedItem } from '../lib/opening-snap';
 import type { LayoutActions } from './use-layout-state';
 import type { FloorLayout } from '../lib/types';
 import type * as ThreeNS from 'three';
@@ -10,6 +10,8 @@ export interface UseItemDragParams {
   activeFloorIndex: number;
   roomWidth: number;
   roomDepth: number;
+  interiorWalls: FloorLayout['interiorWalls'];
+  boundaryWalls: FloorLayout['interiorWalls'];
   actions: LayoutActions;
   allSelectedIds: ReadonlySet<string>;
 }
@@ -23,7 +25,7 @@ export interface UseItemDragResult {
   sceneBoxRef: MutableRefObject<MutableRefObject<ThreeNS.Scene | null> | null>;
   invalidateBoxRef: MutableRefObject<() => void>;
   handleDragStart(primaryId: string): void;
-  handleDrag(id: string, x: number, z: number): void;
+  handleDrag(id: string, x: number, z: number): boolean;
   handleDragEnd(id: string): void;
 }
 
@@ -59,6 +61,8 @@ export function useItemDrag({
   activeFloorIndex,
   roomWidth,
   roomDepth,
+  interiorWalls,
+  boundaryWalls,
   actions,
   allSelectedIds,
 }: UseItemDragParams): UseItemDragResult {
@@ -113,14 +117,14 @@ export function useItemDrag({
   );
 
   const handleDrag = useCallback(
-    (id: string, x: number, z: number) => {
+    (id: string, x: number, z: number): boolean => {
       const session = dragSessionRef.current;
       if (!session || session.primaryId !== id) {
         // No drag session (programmatic move) — dispatch directly.
-        actions.moveItem(id, x, z);
-        return;
+        return false;
       }
-      session.latest.set(id, { x, z });
+      const nextLatest = new Map(session.latest);
+      nextLatest.set(id, { x, z });
 
       // Group drag: translate every other selected group by the same delta.
       // The primary group was already moved by the canvas drag handler.
@@ -131,27 +135,46 @@ export function useItemDrag({
         for (const [otherId, origin] of session.origins) {
           if (otherId === id) continue;
           const next = { x: origin.x + dx, z: origin.z + dz };
-          session.latest.set(otherId, next);
-          const group = findFurnitureGroup(otherId);
-          if (group) {
-            group.position.x = next.x;
-            group.position.z = next.z;
-          }
+          nextLatest.set(otherId, next);
         }
       }
 
       const candidateItems = activeFloor.items.map((item) => {
-        const moved = session.latest.get(item.id);
-        return moved ? { ...item, position: moved } : item;
+        const moved = nextLatest.get(item.id);
+        if (!moved) return item;
+        if (isOpening(item.type)) {
+          const snapped = snapOpeningToWall({ position: moved, itemWidth: item.width, roomWidth, roomDepth,
+            interiorWalls, boundaryWalls });
+          nextLatest.set(item.id, snapped.position);
+          return { ...item, position: snapped.position, rotation: snapped.rotation };
+        }
+        return { ...item, position: moved };
       });
+      session.latest = nextLatest;
+      for (const item of candidateItems) {
+        if (nextLatest.has(item.id) && isOpening(item.type)) {
+          const group = findFurnitureGroup(item.id);
+          if (group) group.rotation.y = item.rotation ?? 0;
+        }
+      }
+      for (const [otherId, next] of nextLatest) {
+        if (otherId === id) continue;
+        const group = findFurnitureGroup(otherId);
+        if (group) {
+          group.position.x = next.x;
+          group.position.z = next.z;
+        }
+      }
+
       const dragged = candidateItems.find((item) => item.id === id);
       const primaryGroup = findFurnitureGroup(id);
       if (dragged && primaryGroup) {
-        setDragCollisionTint(primaryGroup, hasCollisions(dragged, candidateItems, roomWidth, roomDepth));
+        setDragCollisionTint(primaryGroup, hasCollisions(dragged, candidateItems, roomWidth, roomDepth, interiorWalls ?? [], boundaryWalls ?? []));
       }
       invalidateBoxRef.current();
+      return true;
     },
-    [actions, activeFloor.items, roomWidth, roomDepth, findFurnitureGroup, setDragCollisionTint]
+    [actions, activeFloor.items, roomWidth, roomDepth, interiorWalls, boundaryWalls, findFurnitureGroup, setDragCollisionTint]
   );
 
   const handleDragEnd = useCallback(
@@ -188,12 +211,13 @@ export function useItemDrag({
           releasePos,
           roomWidth,
           roomDepth,
-          activeFloor.interiorWalls ?? []
+          activeFloor.interiorWalls ?? [],
+          boundaryWalls ?? []
         );
         if (settled) actions.updateItem(movedId, settled);
       }
     },
-    [activeFloor.items, activeFloor.interiorWalls, roomWidth, roomDepth, actions, findFurnitureGroup, setDragCollisionTint]
+    [activeFloor.items, activeFloor.interiorWalls, boundaryWalls, roomWidth, roomDepth, actions, findFurnitureGroup, setDragCollisionTint]
   );
 
   return { sceneBoxRef, invalidateBoxRef, handleDragStart, handleDrag, handleDragEnd };

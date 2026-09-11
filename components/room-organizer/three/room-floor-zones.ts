@@ -149,6 +149,86 @@ export function findClosedFloorLoops(walls: readonly InteriorWall[]): PlanPoint[
   return [...loops.values()];
 }
 
+/**
+ * Find room polygons even when the user intentionally leaves one side open.
+ * The missing side is virtual: it is used only for the floor triangulation
+ * and never becomes a rendered wall.
+ */
+export function findFloorLoops(walls: readonly InteriorWall[]): PlanPoint[][] {
+  const closed = findClosedFloorLoops(walls);
+  const segments = splitWallsAtJunctions(walls);
+  const points = new Map<string, PlanPoint>();
+  const graph = new Map<string, Set<string>>();
+  let pointNumber = 0;
+  const pointKey = (point: PlanPoint): string => {
+    for (const [key, existing] of points) {
+      if (Math.hypot(existing.x - point.x, existing.z - point.z) <= POINT_TOLERANCE) return key;
+    }
+    const key = `open-p${pointNumber++}`;
+    points.set(key, point);
+    graph.set(key, new Set());
+    return key;
+  };
+
+  for (const segment of segments) {
+    const a = pointKey(segment.a);
+    const b = pointKey(segment.b);
+    if (a === b) continue;
+    graph.get(a)!.add(b);
+    graph.get(b)!.add(a);
+  }
+
+  const visited = new Set<string>();
+  const virtualClosures: InteriorWall[] = [];
+  for (const start of graph.keys()) {
+    if (visited.has(start)) continue;
+    const component: string[] = [];
+    const stack = [start];
+    visited.add(start);
+    while (stack.length) {
+      const current = stack.pop()!;
+      component.push(current);
+      for (const next of graph.get(current) ?? []) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          stack.push(next);
+        }
+      }
+    }
+
+    const endpoints = component.filter((key) => (graph.get(key)?.size ?? 0) === 1);
+    // Pair open ends. A single open chain has two ends; more complex open
+    // components are paired by proximity so a missing side still gets a floor.
+    while (endpoints.length >= 2) {
+      const a = endpoints.shift()!;
+      let bestIndex = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < endpoints.length; index += 1) {
+        const b = endpoints[index]!;
+        const distance = Math.hypot(points.get(a)!.x - points.get(b)!.x, points.get(a)!.z - points.get(b)!.z);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      }
+      const b = endpoints.splice(bestIndex, 1)[0]!;
+      const startPoint = points.get(a)!;
+      const endPoint = points.get(b)!;
+      virtualClosures.push({
+        id: `virtual-floor-closure-${virtualClosures.length}`,
+        x1: startPoint.x,
+        z1: startPoint.z,
+        x2: endPoint.x,
+        z2: endPoint.z,
+      });
+    }
+  }
+
+  return virtualClosures.length > 0
+    ? findClosedFloorLoops([...walls, ...virtualClosures])
+    : closed;
+}
+
 export function clearRoomFloorZones(scene: ThreeNS.Scene): void {
   scene.children
     .filter((object) => object.userData.type === FLOOR_ZONE_TAG)
@@ -170,7 +250,7 @@ export function renderRoomFloorZones(
     skipLargestLoop?: boolean;
   }
 ): void {
-  const loops = findClosedFloorLoops(walls);
+  const loops = findFloorLoops(walls);
   const largestLoopIndex = options.skipLargestLoop && loops.length > 0
     ? loops.reduce((largest, loop, index) => Math.abs(area(loop)) > Math.abs(area(loops[largest]!)) ? index : largest, 0)
     : -1;

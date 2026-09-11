@@ -88,6 +88,8 @@ export function isFurnitureItem(value: unknown): value is FurnitureItem {
   if (v.position !== undefined && !isVec2(v.position)) return false;
   if (v.elevation !== undefined && (!isFiniteNumber(v.elevation) || v.elevation < 0)) return false;
   if (v.rotation !== undefined && !isFiniteNumber(v.rotation)) return false;
+  if (v.collisionWidth !== undefined && !isItemDimension(v.collisionWidth)) return false;
+  if (v.collisionDepth !== undefined && !isItemDimension(v.collisionDepth)) return false;
   // Ranges must be positive: negative signal/vision values invert ring and
   // cone geometry (#121). FOV additionally caps at a full circle.
   if (!isOptionalPositiveNumber(v.signalRange)) return false;

@@ -64,6 +64,12 @@ export function applyWallDisplay(
       continue;
     }
     if (tag === ROOM_OBJECT_TAGS.Furniture && obj.userData.exteriorOpening === true) {
+      // Keep security cameras visible when their mounting wall is hidden by
+      // cutaway/walls-down mode; they are inspection devices, not openings.
+      if (obj.userData.itemType === 'security-camera') {
+        obj.visible = true;
+        continue;
+      }
       if (mode === 'down') {
         obj.visible = false;
       } else if (mode === 'up') {
@@ -152,7 +158,7 @@ export function applyWallDisplay(
 
 // Warm cream — build-mode build mode walls read as tan/cream by default, never
 // the neutral mid-grey we used to fall back to.
-const DEFAULT_WALL_COLOR = 0xe8dcc4;
+const DEFAULT_WALL_COLOR = 0xe3e4e6;
 // Keep the exterior shell identical to newly drawn interior segments. This is
 // intentionally shared in value with interior-walls.ts: every wall begins as
 // a 2.60 m high, 16 cm thick construction element.
@@ -274,7 +280,9 @@ function buildBoundaryFloorGeometry(THREE: ThreeModule, walls: readonly Interior
     if (Math.hypot(next.x1 - current.x, next.z1 - current.z) < 0.01) vertices.push({ x: next.x2, z: next.z2 });
     else vertices.push({ x: next.x1, z: next.z1 });
   }
-  for (const vertex of vertices) points.lineTo(vertex.x, -vertex.z);
+  const firstVertex = vertices[0]!;
+  points.moveTo(firstVertex.x, -firstVertex.z);
+  for (const vertex of vertices.slice(1)) points.lineTo(vertex.x, -vertex.z);
   points.closePath();
   return new THREE.ShapeGeometry(points);
 }

@@ -5,6 +5,7 @@ import {
   autoOrganize,
   boundingRadius,
   hasCollisions,
+  movementCrossesWall,
   itemInBounds,
   itemsOverlap,
   rotatedHalfExtents,
@@ -14,6 +15,25 @@ import {
 describe('boundingRadius', () => {
   it('is the half-diagonal of the footprint', () => {
     expect(boundingRadius({ width: 4, depth: 3 })).toBeCloseTo(2.5, 10); // hypot(2,1.5)
+  });
+});
+
+describe('continuous wall movement', () => {
+  const wall = { id: 'partition', x1: 0, z1: -5, x2: 0, z2: 5 };
+  it('blocks a jump completely across a wall in either direction', () => {
+    for (const sign of [-1, 1]) {
+      const item = makeItem({ width: 1, depth: 1, position: { x: sign * 3, z: 0 } });
+      expect(movementCrossesWall(item, { x: -sign * 3, z: 0 }, [wall])).toBe(true);
+    }
+  });
+  it('allows parallel movement and travel around an endpoint', () => {
+    const item = makeItem({ width: 1, depth: 1, position: { x: -3, z: 0 } });
+    expect(movementCrossesWall(item, { x: -3, z: 4 }, [wall])).toBe(false);
+    expect(movementCrossesWall({ ...item, position: { x: -3, z: 6 } }, { x: 3, z: 6 }, [wall])).toBe(false);
+  });
+  it('blocks rotated furniture crossing a diagonal wall', () => {
+    const item = makeItem({ width: 2, depth: 0.5, rotation: Math.PI / 4, position: { x: -3, z: 3 } });
+    expect(movementCrossesWall(item, { x: 3, z: -3 }, [{ ...wall, x1: -5, z1: -5, x2: 5, z2: 5 }])).toBe(true);
   });
 });
 

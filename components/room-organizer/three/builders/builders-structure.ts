@@ -3,13 +3,18 @@ import type * as ThreeNS from 'three';
 
 export function buildDoor({ THREE, item, hasCollision, baseColor, opacity }: BuilderContext): ThreeNS.Group {
   const group = new THREE.Group();
-  const frameMat = material(THREE, baseColor, hasCollision, opacity, { roughness: 0.7 });
+  // Match the rendered door to the wall depth so it is visible from both sides.
+  const wallDepth = Math.max(item.depth, 0.16);
+  const frameMat = material(THREE, baseColor, hasCollision, opacity, {
+    roughness: 0.7,
+    side: THREE.DoubleSide,
+  });
   const handleMat = material(THREE, 0xd7c483, hasCollision, opacity, { metalness: 0.8, roughness: 0.2 });
 
   // Door slab (almost as wide and tall as the wall opening).
   const slab = mesh(
     THREE,
-    new THREE.BoxGeometry(item.width * 0.95, item.height * 0.97, item.depth * 0.5),
+    new THREE.BoxGeometry(item.width * 0.95, item.height * 0.97, wallDepth * 0.9),
     frameMat
   );
   slab.position.set(0, item.height / 2, 0);
@@ -17,7 +22,7 @@ export function buildDoor({ THREE, item, hasCollision, baseColor, opacity }: Bui
 
   // Frame around the slab — three thin boxes (left, right, top).
   const frameThickness = 0.06;
-  const sideGeo = new THREE.BoxGeometry(frameThickness, item.height, item.depth);
+  const sideGeo = new THREE.BoxGeometry(frameThickness, item.height, wallDepth);
   for (const dx of [-1, 1]) {
     const side = mesh(THREE, sideGeo, frameMat);
     side.position.set(dx * (item.width / 2 - frameThickness / 2), item.height / 2, 0);
@@ -25,7 +30,7 @@ export function buildDoor({ THREE, item, hasCollision, baseColor, opacity }: Bui
   }
   const lintel = mesh(
     THREE,
-    new THREE.BoxGeometry(item.width, frameThickness, item.depth),
+    new THREE.BoxGeometry(item.width, frameThickness, wallDepth),
     frameMat
   );
   lintel.position.set(0, item.height - frameThickness / 2, 0);
@@ -33,7 +38,7 @@ export function buildDoor({ THREE, item, hasCollision, baseColor, opacity }: Bui
 
   // Handle.
   const handle = mesh(THREE, new THREE.SphereGeometry(0.04, 12, 10), handleMat);
-  handle.position.set(item.width * 0.35, item.height * 0.5, item.depth * 0.28);
+  handle.position.set(item.width * 0.35, item.height * 0.5, wallDepth * 0.5);
   group.add(handle);
 
   return group;

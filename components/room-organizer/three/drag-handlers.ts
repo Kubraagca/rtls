@@ -24,12 +24,14 @@ export interface SceneEventHandlers {
    */
   walkthroughActive?: boolean;
   onItemSelect: (id: string, mode: SelectionMode) => void;
+  /** Select all active-floor furniture inside a screen-space marquee. */
+  onAreaSelect?: (ids: string[]) => void;
   onLightToggle?: (id: string) => void;
   onCurtainToggle?: (id: string) => void;
   /** Live mode treats a light click as an interaction, not a drag/select gesture. */
   toggleLightOnSelect?: boolean;
   onItemDragStart?: (id: string) => void;
-  onItemDrag: (id: string, x: number, z: number) => void;
+  onItemDrag: (id: string, x: number, z: number) => boolean | void;
   onItemDragEnd?: (id: string) => void;
   onItemHover?: (info: HoverInfo | null) => void;
   onEmptyClick?: (x: number, z: number) => void;
@@ -112,6 +114,7 @@ export function attachDragHandlers({
   let dragTarget: ThreeNS.Object3D | null = null;
   let dragStarted = false;
   let activePointerId: number | null = null;
+  let areaStart: { x: number; y: number } | null = null;
   let downClientX = 0;
   let downClientY = 0;
 
@@ -125,6 +128,24 @@ export function attachDragHandlers({
     dragTarget = null;
     dragStarted = false;
     activePointerId = null;
+    areaStart = null;
+  };
+
+  const selectScreenArea = (start: { x: number; y: number }, end: { x: number; y: number }): void => {
+    const rect = canvas.getBoundingClientRect();
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    const ids = furnitureList().flatMap((group) => {
+      const point = group.position.clone().project(camera);
+      const x = rect.left + (point.x + 1) * 0.5 * rect.width;
+      const y = rect.top + (1 - point.y) * 0.5 * rect.height;
+      return x >= minX && x <= maxX && y >= minY && y <= maxY
+        ? [group.userData.id as string]
+        : [];
+    });
+    handlersRef.current.onAreaSelect?.(ids);
   };
 
   const beginDragSession = (event: PointerEvent): void => {
@@ -150,6 +171,15 @@ export function attachDragHandlers({
     // Only track a single primary pointer at a time. A second finger arriving
     // mid-gesture is ignored here so it can drive OrbitControls' pinch.
     if (activePointerId !== null) return;
+
+    // Alt-drag on the empty scene creates a screen-space marquee selection.
+    if (event.altKey && handlersRef.current.onAreaSelect) {
+      areaStart = { x: event.clientX, y: event.clientY };
+      activePointerId = event.pointerId;
+      try { canvas.setPointerCapture(event.pointerId); } catch { /* best effort */ }
+      controls.enabled = false;
+      return;
+    }
 
     setPointerFromEvent(event);
     raycaster.setFromCamera(pointer, camera);
@@ -244,6 +274,7 @@ export function attachDragHandlers({
 
   const onPointerMove = (event: PointerEvent): void => {
     if (canvas.dataset.spacePan === 'true') return;
+    if (areaStart) return;
     if (!dragTarget) {
       // Hover + tooltip is a mouse/pen affordance only. Skipping it for touch
       // avoids per-frame React re-renders while a finger drags.
@@ -279,17 +310,24 @@ export function attachDragHandlers({
     const itemId = dragTarget.userData.id as string;
     const snapped = handlersRef.current.snapPosition(itemId, intersection.x, intersection.z);
 
+    const accepted = handlersRef.current.onItemDrag(itemId, snapped.x, snapped.z);
+    if (accepted === false) return;
     dragTarget.position.x = snapped.x;
     dragTarget.position.z = snapped.z;
     markDirty();
     // The item is a shadow caster; recompute the static shadow map so its cast
     // shadow tracks the drag instead of freezing at the drag-start position.
     requestShadowUpdate?.();
-    handlersRef.current.onItemDrag(itemId, snapped.x, snapped.z);
   };
 
   const endGesture = (event: PointerEvent): void => {
     if (event.pointerId !== activePointerId && activePointerId !== null) return;
+    if (areaStart) {
+      selectScreenArea(areaStart, { x: event.clientX, y: event.clientY });
+      controls.enabled = true;
+      resetDragState();
+      return;
+    }
     const started = dragStarted;
     const target = dragTarget;
     if (activePointerId !== null) {

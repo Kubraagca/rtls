@@ -14,6 +14,8 @@ export interface WallSnapOptions {
   existingWalls: readonly InteriorWall[];
   /** When chaining, the previous endpoint enables right-angle snapping. */
   fromPoint?: Vec2 | null;
+  /** First point of the current chain; snapping to it closes the room. */
+  closePoint?: Vec2 | null;
   /** Building footprint, used as additional snap targets at the corners and edges. */
   roomWidth: number;
   roomDepth: number;
@@ -41,6 +43,7 @@ export function snapWallEndpoint({
   point,
   existingWalls,
   fromPoint = null,
+  closePoint = null,
   roomWidth,
   roomDepth,
   snapDistance = 0.45,
@@ -60,6 +63,7 @@ export function snapWallEndpoint({
 
   // 1. Vertex snap — existing wall endpoints + building corners.
   const vertices: Vec2[] = [];
+  if (closePoint) vertices.push(closePoint);
   for (const wall of existingWalls) {
     vertices.push({ x: wall.x1, z: wall.z1 }, { x: wall.x2, z: wall.z2 });
   }

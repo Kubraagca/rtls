@@ -43,6 +43,17 @@ describe('snapWallEndpoint — vertex snap', () => {
     // Should snap to the building corner (5,5), not the stale (99,99) vertex.
     expect(result.point).toEqual({ x: 5, z: 5 });
   });
+
+  it('snaps back to the first chain point so a room can be closed easily', () => {
+    const result = snapWallEndpoint({
+      point: { x: -1.58, z: -1.54 },
+      existingWalls: [],
+      closePoint: { x: -1.5, z: -1.5 },
+      ...ROOM,
+    });
+    expect(result.kind).toBe('vertex');
+    expect(result.point).toEqual({ x: -1.5, z: -1.5 });
+  });
 });
 
 describe('snapWallEndpoint — right-angle snap', () => {

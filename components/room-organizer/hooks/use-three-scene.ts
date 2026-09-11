@@ -14,6 +14,8 @@ export type { HoverInfo, SelectionMode } from '../three/drag-handlers';
 
 export interface UseThreeSceneOptions extends SceneEventHandlers {
   canvasRef: React.RefObject<HTMLCanvasElement>;
+  /** Maximum overview-camera distance derived from the active floor size. */
+  maxZoomDistance?: number;
 }
 
 export interface UseThreeSceneResult {
@@ -39,8 +41,10 @@ export interface UseThreeSceneResult {
 export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResult {
   const {
     canvasRef,
+    maxZoomDistance,
     walkthroughActive,
     onItemSelect,
+    onAreaSelect,
     onLightToggle,
     onCurtainToggle,
     toggleLightOnSelect,
@@ -82,12 +86,15 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   const sceneRef = useRef<ThreeNS.Scene | null>(null);
   const cameraRef = useRef<ThreeNS.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControlsType | null>(null);
+  const maxZoomDistanceRef = useRef(maxZoomDistance ?? THREE_VIEW_MAX_DISTANCE);
+  maxZoomDistanceRef.current = maxZoomDistance ?? THREE_VIEW_MAX_DISTANCE;
 
   // Latest-callback refs: capture handlers without making them part of the
   // init-effect dependency list (which would tear down the scene unnecessarily).
   const handlersRef = useRef<SceneEventHandlers>({
     walkthroughActive,
     onItemSelect,
+    onAreaSelect,
     onLightToggle,
     onCurtainToggle,
     toggleLightOnSelect,
@@ -105,6 +112,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   handlersRef.current = {
     walkthroughActive,
     onItemSelect,
+    onAreaSelect,
     onLightToggle,
     onCurtainToggle,
     toggleLightOnSelect,
@@ -233,7 +241,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       controls.dampingFactor = 0.05;
       controls.enablePan = true;
       controls.minDistance = THREE_VIEW_MIN_DISTANCE;
-      controls.maxDistance = THREE_VIEW_MAX_DISTANCE;
+      controls.maxDistance = maxZoomDistanceRef.current;
       controls.zoomToCursor = true;
       controls.minPolarAngle = 0.05;
       controls.maxPolarAngle = Math.PI - 0.05;
@@ -309,6 +317,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         // As the user zooms into a floor, gradually unlock a steeper orbit so
         // the ceiling can be inspected without changing the wide overview.
         const orbitDistance = camera.position.distanceTo(controls.target);
+        controls.maxDistance = maxZoomDistanceRef.current;
         const zoomProgress = Math.max(0, Math.min(1, (14 - orbitDistance) / 12));
         controls.maxPolarAngle = Math.PI / 2.5 + zoomProgress * (Math.PI - 0.05 - Math.PI / 2.5);
         // OrbitControls.update() returns true while the camera is moving

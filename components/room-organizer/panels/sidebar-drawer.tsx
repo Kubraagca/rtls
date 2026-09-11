@@ -225,7 +225,7 @@ export function SidebarDrawer({
 
               {selectedItem && (
                 <ItemResizePanel
-                  hasCollision={hasCollisions(selectedItem, activeFloor.items, layout.width, layout.height)}
+                  hasCollision={hasCollisions(selectedItem, activeFloor.items, layout.width, layout.height, activeFloor.interiorWalls ?? [])}
                   onDuplicate={(id) => {
                     const newId = actions.duplicateItem(id);
                     selectOnly(newId);
