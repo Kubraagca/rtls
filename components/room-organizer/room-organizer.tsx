@@ -24,9 +24,10 @@ import { useWalkthrough } from './hooks/use-walkthrough';
 import {
   CAMERA_BRACKET_ARM,
   FURNITURE_CATALOG,
+  GRID_SIZE_METERS,
 } from './lib/constants';
 import { DEFAULT_DIGITAL_TWIN_LAYERS, type DigitalTwinLayerState } from './lib/digital-twin-layers';
-import { hasCollisions } from './lib/geometry';
+import { hasCollisions, snapToGrid } from './lib/geometry';
 import { reseatWallMountedItem, settleWallMountedItem } from './lib/opening-snap';
 import { playSound, type SoundCue } from './lib/sounds';
 import { FLOOR_HEIGHT_METERS } from './lib/types';
@@ -207,8 +208,12 @@ export function RoomOrganizer(): JSX.Element {
 
   const wallSnapResult = useMemo(() => {
     if (!view.drawWallMode || !pointerWorld) return null;
+    const gridPoint = view.snapToGrid ? {
+      x: snapToGrid(pointerWorld.x, GRID_SIZE_METERS),
+      z: snapToGrid(pointerWorld.z, GRID_SIZE_METERS),
+    } : pointerWorld;
     return snapWallEndpoint({
-      point: pointerWorld,
+      point: gridPoint,
       existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
       fromPoint: wallDraft,
       closePoint: wallChainStart,
@@ -219,7 +224,7 @@ export function RoomOrganizer(): JSX.Element {
       snapDistance: 0.65,
       clampToRoom: false,
     });
-  }, [view.drawWallMode, pointerWorld, activeFloor.interiorWalls, wallDraft, wallChainStart, layout.width, layout.height]);
+  }, [view.drawWallMode, view.snapToGrid, pointerWorld, activeFloor.interiorWalls, wallDraft, wallChainStart, layout.width, layout.height]);
 
   const highlightedIds = useMemo(() => {
     const normalised = catalogQuery.trim().toLowerCase();
@@ -270,8 +275,11 @@ export function RoomOrganizer(): JSX.Element {
   const handleEmptyClick = useCallback(
     (x: number, z: number, chainWall = true, snap = true, clampToRoom = snap) => {
       if (view.drawWallMode) {
+        const gridPoint = snap && view.snapToGrid
+          ? { x: snapToGrid(x, GRID_SIZE_METERS), z: snapToGrid(z, GRID_SIZE_METERS) }
+          : { x, z };
         const snapped = snapWallEndpoint({
-          point: { x, z },
+          point: gridPoint,
           existingWalls: [...(layout.boundaryWalls ?? []), ...(activeFloor.interiorWalls ?? [])],
           fromPoint: wallDraft,
           closePoint: wallChainStart,
@@ -321,6 +329,7 @@ export function RoomOrganizer(): JSX.Element {
     [
       view.measurementMode,
       view.drawWallMode,
+      view.snapToGrid,
       wallDraft,
       wallChainStart,
       actions,
@@ -1396,6 +1405,7 @@ export function RoomOrganizer(): JSX.Element {
               planPanX={planCamera.panX}
               planPanY={planCamera.panY}
               actions={actions}
+              snapPosition={snapPosition}
               onSelectWall={(id, kind = 'interior') => {
                 setSelectedWall(id ? { id, kind } : null);
                 setSelectedItemId(null);

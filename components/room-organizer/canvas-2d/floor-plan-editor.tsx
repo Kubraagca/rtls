@@ -24,14 +24,16 @@ interface FloorPlanEditorProps {
   onPointerDown?(clientX: number, clientY: number): void;
   onPointerUp?(): void;
   drawWallMode?: boolean;
+  snapPosition?(id: string, x: number, z: number): { x: number; z: number };
 }
 
 type DragState = { kind: 'wall'; wall: InteriorWall; x: number; y: number } | { kind: 'endpoint'; wall: InteriorWall; endpoint: 'start' | 'end'; x: number; y: number } | { kind: 'item'; id: string; x: number; y: number } | { kind: 'edge'; edge: 'north' | 'south' | 'east' | 'west'; x: number; y: number } | null;
 
 
-export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId, planZoom = 1, planPanX = 0, planPanY = 0, actions, onSelectWall, onSelectItem, onAreaSelect, onWheel, onResizePan, wallDraft, pointerWorld, onPointerMove, onPointerDown, onPointerUp, drawWallMode }: FloorPlanEditorProps): JSX.Element {
+export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId, planZoom = 1, planPanX = 0, planPanY = 0, actions, onSelectWall, onSelectItem, onAreaSelect, onWheel, onResizePan, wallDraft, pointerWorld, onPointerMove, onPointerDown, onPointerUp, drawWallMode, snapPosition }: FloorPlanEditorProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState>(null);
+  const itemPositionRef = useRef<{ x: number; z: number } | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [areaStart, setAreaStart] = useState<{ x: number; y: number } | null>(null);
   const [areaEnd, setAreaEnd] = useState<{ x: number; y: number } | null>(null);
@@ -54,7 +56,17 @@ export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId,
     const rect = hostRef.current?.getBoundingClientRect();
     return { x: event.clientX - (rect?.left ?? 0), y: event.clientY - (rect?.top ?? 0) };
   };
-  const start = (event: React.PointerEvent<SVGElement>, drag: Exclude<DragState, null>) => { event.stopPropagation(); event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); dragRef.current = { ...drag, x: event.clientX, y: event.clientY } as DragState; };
+  const start = (event: React.PointerEvent<SVGElement>, drag: Exclude<DragState, null>) => {
+    event.stopPropagation(); event.preventDefault();
+    if (event.button !== 0) return;
+    if (drag.kind === 'item') {
+      const item = floor.items.find((entry) => entry.id === drag.id);
+      if (item?.locked || !item?.position) return;
+      itemPositionRef.current = { ...item.position };
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { ...drag, x: event.clientX, y: event.clientY } as DragState;
+  };
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
     if (areaStart) {
       setAreaEnd(localPoint(event));
@@ -74,7 +86,15 @@ export function FloorPlanEditor({ layout, floor, selectedWallId, selectedItemId,
       if (drag.wall.id.startsWith('outer-')) actions.updateBoundaryWall(drag.wall.id, drag.wall);
       else actions.updateInteriorWall(drag.wall.id, drag.wall);
     }
-    else if (drag.kind === 'item') { const item = floor.items.find((entry) => entry.id === drag.id); if (item?.position) actions.moveItem(drag.id, item.position.x + dx, item.position.z + dz); }
+    else if (drag.kind === 'item') {
+      const position = itemPositionRef.current;
+      if (position) {
+        // Keep an unsnapped accumulator so slow movements can cross grid cells.
+        position.x += dx; position.z += dz;
+        const next = snapPosition?.(drag.id, position.x, position.z) ?? position;
+        actions.moveItem(drag.id, next.x, next.z);
+      }
+    }
     else if (drag.edge === 'east' || drag.edge === 'west') {
       const deltaWidth = (drag.edge === 'east' ? dx : -dx) * 2;
       const nextWidth = Math.max(1, layout.width + deltaWidth);
