@@ -54,6 +54,15 @@ describe('snapWallEndpoint — vertex snap', () => {
     expect(result.kind).toBe('vertex');
     expect(result.point).toEqual({ x: -1.5, z: -1.5 });
   });
+
+  it('returns the exact existing endpoint, so two walls share one junction', () => {
+    const result = snapWallEndpoint({
+      point: { x: 1.48, z: -2.53 },
+      existingWalls: [{ id: 'existing', x1: -3, z1: 0, x2: 1.5, z2: -2.5 }],
+      ...ROOM,
+    });
+    expect(result).toEqual({ point: { x: 1.5, z: -2.5 }, kind: 'vertex' });
+  });
 });
 
 describe('snapWallEndpoint — right-angle snap', () => {

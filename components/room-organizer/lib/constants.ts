@@ -1,3 +1,4 @@
+import { RTLS_STUDIO_TEMPLATE } from './rtls-studio-template';
 import type { CatalogItem, CategoryMeta, FloorLayout, RoomLayout } from './types';
 
 export const STORAGE_KEY = 'standalone-room-organizer-layout-v3';
@@ -205,7 +206,7 @@ export const FURNITURE_CATALOG = [
 
 export const FURNITURE_TYPES_WITH_SIGNALS = ['wifi', 'cctv'] as const;
 
-export type RoomTemplateKey = 'bedroom' | 'livingRoom' | 'office' | 'kitchen' | 'bathroom' | 'studio' | 'twoStory';
+export type RoomTemplateKey = 'rtlsStudio' | 'bedroom' | 'livingRoom' | 'office' | 'kitchen' | 'bathroom' | 'studio' | 'twoStory';
 
 function singleFloorTemplate(
   name: string,
@@ -230,6 +231,7 @@ function singleFloorTemplate(
 }
 
 export const ROOM_TEMPLATES = {
+  rtlsStudio: RTLS_STUDIO_TEMPLATE,
   bedroom: singleFloorTemplate('Bedroom', 4, 3.5, '#F5E6D3', [
     { id: 'bed-1', type: 'bed', category: 'bedroom', name: 'Double Bed', width: 2.0, depth: 1.6, height: 0.6, color: '#E8E8E8', icon: '🛏️', price: 800, position: { x: 0, z: -0.5 }, rotation: 0 },
     { id: 'nightstand-1', type: 'nightstand', category: 'bedroom', name: 'Nightstand', width: 0.5, depth: 0.4, height: 0.6, color: '#8B4513', icon: '🕯️', price: 120, position: { x: -1.3, z: -0.5 }, rotation: 0 },
@@ -262,8 +264,10 @@ export const ROOM_TEMPLATES = {
     { id: 'counter-1', type: 'counter', category: 'kitchen', name: 'Counter', width: 1.2, depth: 0.6, height: 0.9, color: '#D7CCC8', icon: '🟫', price: 280, position: { x: 0.4, z: -1.2 }, rotation: 0 },
     { id: 'sink-1', type: 'kitchen-sink', category: 'kitchen', name: 'Kitchen Sink', width: 0.9, depth: 0.6, height: 0.9, color: '#BDBDBD', icon: '🚰', price: 450, position: { x: 1.5, z: -1.2 }, rotation: 0 },
     { id: 'dining-1', type: 'dining-table', category: 'tables', name: 'Dining Table', width: 1.8, depth: 1.0, height: 0.75, color: '#A0522D', icon: '🟫', price: 420, position: { x: 0, z: 0.6 }, rotation: 0 },
-    { id: 'dining-chair-1', type: 'dining-chair', category: 'seating', name: 'Dining Chair', width: 0.45, depth: 0.45, height: 0.9, color: '#5D4037', icon: '🪑', price: 95, position: { x: -0.7, z: 0.6 }, rotation: Math.PI / 2 },
-    { id: 'dining-chair-2', type: 'dining-chair', category: 'seating', name: 'Dining Chair', width: 0.45, depth: 0.45, height: 0.9, color: '#5D4037', icon: '🪑', price: 95, position: { x: 0.7, z: 0.6 }, rotation: -Math.PI / 2 },
+    // Keep the chairs beside the table, not inside its footprint. At ±0.7 m
+    // their 0.45 m footprint was drawn on top of the 1.8 m table in 2D.
+    { id: 'dining-chair-1', type: 'dining-chair', category: 'seating', name: 'Dining Chair', width: 0.45, depth: 0.45, height: 0.9, color: '#5D4037', icon: '🪑', price: 95, position: { x: -1.2, z: 0.6 }, rotation: Math.PI / 2 },
+    { id: 'dining-chair-2', type: 'dining-chair', category: 'seating', name: 'Dining Chair', width: 0.45, depth: 0.45, height: 0.9, color: '#5D4037', icon: '🪑', price: 95, position: { x: 1.2, z: 0.6 }, rotation: -Math.PI / 2 },
   ]),
   bathroom: singleFloorTemplate('Bathroom', 3, 2.5, '#E0F2F1', [
     { id: 'toilet-1', type: 'toilet', category: 'bathroom', name: 'Toilet', width: 0.4, depth: 0.7, height: 0.8, color: '#FAFAFA', icon: '🚽', price: 220, position: { x: -1.0, z: -0.7 }, rotation: 0 },

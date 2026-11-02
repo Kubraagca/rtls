@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ROOM_TEMPLATES, type RoomTemplateKey } from '../lib/constants';
 
 const TEMPLATE_OPTIONS: ReadonlyArray<{ key: RoomTemplateKey; label: string }> = [
+  { key: 'rtlsStudio', label: 'RTLS Studio ? Profesyonel ofis' },
   { key: 'bedroom', label: '🛏️ Yatak odası' },
   { key: 'livingRoom', label: '🛋️ Salon' },
   { key: 'office', label: '💼 Ev ofisi' },

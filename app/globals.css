@@ -93,6 +93,72 @@
   min-width: 200px;
 }
 
+/* Clean architectural presentation for the editable 2D plan. The SVG remains
+   responsible for hit-testing; these rules only give it the calm, white-board
+   chrome of a professional floor-plan tool. */
+.pc-2d-editor {
+  background: transparent;
+  font-family: var(--pc-font-body);
+}
+.pc-2d-toolbar {
+  position: absolute;
+  z-index: 4;
+  top: 18px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border: 1px solid rgba(100, 116, 139, .18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 5px 18px rgba(48, 61, 70, .08);
+  color: #39434a;
+  pointer-events: none;
+}
+.pc-2d-toolbar__title { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 850; letter-spacing: .09em; }
+.pc-2d-toolbar__dot { width: 8px; height: 8px; border-radius: 50%; background: #0891b2; box-shadow: 0 0 0 4px rgba(8, 145, 178, .12); }
+.pc-2d-toolbar__divider { width: 1px; height: 16px; background: #e5e7eb; }
+.pc-2d-toolbar__meta { color: #65717a; font-size: 11px; font-variant-numeric: tabular-nums; }
+.pc-2d-toolbar__hint { color: #9aa3aa; font-size: 10px; }
+.pc-2d-precision-toggle {
+  pointer-events: auto;
+  border: 1px solid #0891b2;
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: #effcff;
+  color: #08788f;
+  font: 800 10px var(--pc-font-body);
+  cursor: pointer;
+}
+.pc-2d-precision-toggle:hover { background: #d9f8fc; }
+.pc-2d-precision {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  display: grid;
+  gap: 6px;
+  min-width: 250px;
+  padding: 10px;
+  border: 1px solid rgba(8, 145, 178, .28);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 9px 24px rgba(48, 61, 70, .16);
+  pointer-events: auto;
+}
+.pc-2d-precision__title { color: #39434a; font-size: 10px; font-weight: 800; }
+.pc-2d-precision__row { display: grid; grid-template-columns: 70px 1fr 1fr; align-items: center; gap: 5px; color: #65717a; font-size: 10px; }
+.pc-2d-precision__row label { display: grid; grid-template-columns: 12px 1fr; align-items: center; gap: 3px; }
+.pc-2d-precision input { width: 70px; min-width: 0; padding: 3px 4px; border: 1px solid #cbd5dc; border-radius: 4px; color: #263238; font: 700 11px var(--pc-font-body); font-variant-numeric: tabular-nums; }
+.pc-2d-precision input:focus { outline: 2px solid rgba(8, 145, 178, .28); border-color: #0891b2; }
+.pc-2d-precision__hint { color: #7a858d; font-size: 9px; }
+.pc-2d-label { fill: #9aa3aa; font: 800 10px var(--pc-font-body); letter-spacing: .12em; }
+
+@media (max-width: 700px) {
+  .pc-2d-toolbar { top: 10px; left: 10px; padding: 8px 10px; }
+  .pc-2d-toolbar__hint { display: none; }
+}
+
 /* ================================================================
    Responsive: tablet (<1100px)
    ================================================================ */

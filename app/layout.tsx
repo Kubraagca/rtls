@@ -46,12 +46,14 @@ const CHUNK_RECOVERY_SCRIPT = `(function(){
 })();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Browser extensions may inject bis_register/bis_skin_checked attributes
+  // before React hydrates; suppress only those root DOM mutations.
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: CHUNK_RECOVERY_SCRIPT }} />
       </head>
-      <body>{children}</body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Pencil } from 'lucide-react';
+import { Eye, Paintbrush, Pencil } from 'lucide-react';
 import { FloorPlanEditor } from './canvas-2d/floor-plan-editor';
 import { worldPositionFrom2DClient } from './canvas-2d/render';
 import { RoomEditorProvider, type RoomEditorContextValue } from './contexts/room-editor-context';
@@ -45,6 +45,7 @@ import { TouchModeToggle } from './panels/touch-mode-toggle';
 import { TwinzoLiveHud } from './panels/twinzo-live-hud';
 import { Viewport } from './panels/viewport';
 import { WallDisplayPill } from './panels/wall-display-pill';
+import { WallPaintPanel } from './panels/wall-paint-panel';
 import { WelcomeBanner } from './panels/welcome-banner';
 import type { HoverInfo } from './hooks/use-three-scene';
 import type { GameMode } from './lib/types';
@@ -119,9 +120,9 @@ const INITIAL_VIEW_SETTINGS: ViewSettings = {
   walkthroughMode: false,
   showOutdoor: false,
   showAllFloors: false,
-  // Keep the complete room shell visible by default. Cutaway is an explicit
-  // inspection mode so camera-facing walls are not silently hidden.
-  wallDisplay: 'up',
+  // Start in the inspection-friendly section view so the ceiling/roof does
+  // not obscure the room contents on first load.
+  wallDisplay: 'cutaway',
   measurementMode: false,
   soundsEnabled: false,
   drawWallMode: false,
@@ -180,7 +181,11 @@ export function RoomOrganizer(): JSX.Element {
   const [measurementPoints, setMeasurementPoints] = useState<ReadonlyArray<{ x: number; z: number }>>([]);
   const [wallDraft, setWallDraft] = useState<{ x: number; z: number } | null>(null);
   const [wallChainStart, setWallChainStart] = useState<{ x: number; z: number } | null>(null);
+  const [twoDPaintAnchor, setTwoDPaintAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [twoDPaintOpen, setTwoDPaintOpen] = useState(false);
   const [pointerWorld, setPointerWorld] = useState<{ x: number; z: number } | null>(null);
+  const pointerFrameRef = useRef<number | null>(null);
+  const pendingPointerWorldRef = useRef<{ x: number; z: number } | null>(null);
   useEffect(() => {
     if (!view.drawWallMode) return;
     // Entering the drawing tool must never leave an old wall/item selected.
@@ -225,6 +230,26 @@ export function RoomOrganizer(): JSX.Element {
       clampToRoom: false,
     });
   }, [view.drawWallMode, view.snapToGrid, pointerWorld, activeFloor.interiorWalls, wallDraft, wallChainStart, layout.width, layout.height]);
+
+  // A junction belongs to both walls, so endpoint edits must use the same
+  // resolver as drawing. Excluding the wall currently being edited prevents
+  // its old endpoint from pulling the cursor back onto itself.
+  const snap2DWallEndpoint = useCallback((wallId: string, _endpoint: 'start' | 'end', x: number, z: number) => {
+    const point = view.snapToGrid
+      ? { x: snapToGrid(x, GRID_SIZE_METERS), z: snapToGrid(z, GRID_SIZE_METERS) }
+      : { x, z };
+    return snapWallEndpoint({
+      point,
+      existingWalls: [
+        ...(layout.boundaryWalls ?? []).filter((wall) => wall.id !== wallId),
+        ...(activeFloor.interiorWalls ?? []).filter((wall) => wall.id !== wallId),
+      ],
+      roomWidth: layout.width,
+      roomDepth: layout.height,
+      snapDistance: 0.65,
+      clampToRoom: false,
+    }).point;
+  }, [activeFloor.interiorWalls, layout.boundaryWalls, layout.height, layout.width, view.snapToGrid]);
 
   const highlightedIds = useMemo(() => {
     const normalised = catalogQuery.trim().toLowerCase();
@@ -340,10 +365,21 @@ export function RoomOrganizer(): JSX.Element {
   );
 
   const handleFloorPointerMove = useCallback((x: number, z: number) => {
-    setPointerWorld({ x, z });
+    pendingPointerWorldRef.current = { x, z };
+    if (pointerFrameRef.current !== null) return;
+    pointerFrameRef.current = window.requestAnimationFrame(() => {
+      pointerFrameRef.current = null;
+      const next = pendingPointerWorldRef.current;
+      if (next) setPointerWorld(next);
+    });
   }, []);
 
   const handleFloorPointerLeave = useCallback(() => {
+    if (pointerFrameRef.current !== null) {
+      window.cancelAnimationFrame(pointerFrameRef.current);
+      pointerFrameRef.current = null;
+    }
+    pendingPointerWorldRef.current = null;
     setPointerWorld(null);
   }, []);
 
@@ -548,6 +584,9 @@ export function RoomOrganizer(): JSX.Element {
     if (!wall) return;
     const dx = point.x - drag.last.x;
     const dz = point.z - drag.last.z;
+    // Editing an existing endpoint must stay freeform. The SVG editor uses
+    // Shift for an intentional snap; applying the junction resolver here as
+    // the default made millimetre corrections jump back to the old vertex.
     if (drag.mode === 'start') actions.updateInteriorWall(wall.id, { x1: point.x, z1: point.z });
     else if (drag.mode === 'end') actions.updateInteriorWall(wall.id, { x2: point.x, z2: point.z });
     else actions.updateInteriorWall(wall.id, { x1: wall.x1 + dx, z1: wall.z1 + dz, x2: wall.x2 + dx, z2: wall.z2 + dz });
@@ -568,6 +607,13 @@ export function RoomOrganizer(): JSX.Element {
       setPointerWorld(null);
     }
   }, [view.drawWallMode]);
+
+  useEffect(() => {
+    if (!view.view2D) {
+      setTwoDPaintAnchor(null);
+      setTwoDPaintOpen(false);
+    }
+  }, [view.view2D]);
 
   // Floor switch: drop any in-progress wall draft and selection (those live on
   // the previous floor) and slide the camera target up/down to the new floor.
@@ -1025,7 +1071,10 @@ export function RoomOrganizer(): JSX.Element {
   });
 
   useDigitalTwinOverlays({
-    enabled: isReady && gameMode === 'live' && !view.view2D,
+    // Keep the live 3D scene clean: zone borders and route tubes are useful
+    // diagnostics, but they obscure the office floor during presentation.
+    // Device/avatar labels and tracking remain available through the live HUD.
+    enabled: false,
     layers: liveLayers,
     threeModuleRef,
     sceneRef,
@@ -1365,10 +1414,10 @@ export function RoomOrganizer(): JSX.Element {
           if (!view.drawWallMode) return;
           const canvas = canvas2DRef.current;
           const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
-          setPointerWorld(point);
+          if (point) handleFloorPointerMove(point.x, point.z);
         }}
         on2DMouseUp={handle2DWallMouseUp}
-        on2DMouseLeave={() => setPointerWorld(null)}
+        on2DMouseLeave={handleFloorPointerLeave}
         on2DWheel={handle2DWheel}
         hover={
           hover &&
@@ -1399,6 +1448,7 @@ export function RoomOrganizer(): JSX.Element {
               key={`${activeFloor.id}:${activeFloor.items.map((item) => item.id).join('|')}`}
               layout={layout}
               floor={activeFloor}
+              activeFloorIndex={activeFloorIndex}
               selectedWallId={selectedWall?.id ?? null}
               selectedItemId={selectedItem?.id ?? null}
               planZoom={planCamera.zoom}
@@ -1420,6 +1470,7 @@ export function RoomOrganizer(): JSX.Element {
                   setExtraSelectedIds(new Set());
                 }
               }}
+              onItemHover={(id, clientX, clientY) => setHover(id ? { id, clientX, clientY } : null)}
               onAreaSelect={selectAreaItems}
               onWheel={handle2DWheel}
               onResizePan={(x, y) => setPlanCamera((current) => ({ ...current, panX: current.panX + x, panY: current.panY + y }))}
@@ -1430,14 +1481,71 @@ export function RoomOrganizer(): JSX.Element {
                 if (!view.drawWallMode) return;
                 const canvas = canvas2DRef.current;
                 const point = canvas ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, { ...planCamera, allowOutside: true }) : null;
-                setPointerWorld(point);
+                if (point) handleFloorPointerMove(point.x, point.z);
               }}
               onPointerDown={handle2DWallMouseDown}
               onPointerUp={handle2DWallMouseUp}
+              onContextMenu={(clientX, clientY) => {
+                setTwoDPaintAnchor({ x: clientX, y: clientY });
+                setTwoDPaintOpen(false);
+              }}
+              snapWallEndpoint={snap2DWallEndpoint}
             />
           ) : null
         }
       />
+
+      {view.view2D && twoDPaintAnchor && (
+        <>
+          {!twoDPaintOpen && (
+            <button
+              type="button"
+              aria-label="Zemin rengini değiştir"
+              title="Zemin rengini değiştir"
+              className="pc-glass pc-glass--dark pc-tile"
+              onClick={() => setTwoDPaintOpen(true)}
+              style={{
+                position: 'fixed',
+                left: Math.min(twoDPaintAnchor.x, Math.max(8, window.innerWidth - 54)),
+                top: Math.min(twoDPaintAnchor.y, Math.max(8, window.innerHeight - 54)),
+                width: 42,
+                height: 42,
+                padding: 0,
+                borderRadius: 12,
+                zIndex: 70,
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--pc-cyan-glow)',
+                cursor: 'pointer',
+              }}
+            >
+              <Paintbrush size={19} strokeWidth={2.1} />
+            </button>
+          )}
+          {twoDPaintOpen && (
+            <div
+              style={{
+                position: 'fixed',
+                left: Math.min(twoDPaintAnchor.x, Math.max(8, window.innerWidth - 304)),
+                top: Math.min(twoDPaintAnchor.y, Math.max(8, window.innerHeight - 430)),
+                zIndex: 70,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <WallPaintPanel
+                selectedWall={null}
+                onSelectedWallChange={() => undefined}
+                initialSurface="floor"
+                floorOnly
+                onClose={() => {
+                  setTwoDPaintOpen(false);
+                  setTwoDPaintAnchor(null);
+                }}
+              />
+            </div>
+          )}
+        </>
+      )}
 
       {gameMode !== 'live' && (
         <LotBadge

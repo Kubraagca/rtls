@@ -4,7 +4,7 @@ import { useRef, useState, type ChangeEvent } from 'react';
 import { CATEGORIES, MAX_ITEM_DIMENSION } from '../lib/constants';
 import { createCustomGlbId, inspectGlbBinary, MAX_CUSTOM_GLB_BYTES, saveCustomGlbAsset, type CustomGlbInspection } from '../lib/custom-glb-store';
 import type { CatalogItem, FurnitureCategory } from '../lib/types';
-import { inspectCustomGlbScene } from '../three/custom-gltf-assets';
+import { inspectCustomGlbScene, renderCustomGlbTopThumbnail } from '../three/custom-gltf-assets';
 import { registerCatalogItem } from '../lib/catalog-registry';
 
 interface PreviewInfo extends CustomGlbInspection {
@@ -40,7 +40,6 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
   const [preview, setPreview] = useState<PreviewInfo | null>(null);
   const [fileName, setFileName] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [thumbnail, setThumbnail] = useState<File | null>(null);
   const [category, setCategory] = useState<FurnitureCategory>('office');
   const [width, setWidth] = useState('1.00');
   const [depth, setDepth] = useState('1.00');
@@ -54,7 +53,6 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
     setPreview(null);
     setFileName('');
     setDisplayName('');
-    setThumbnail(null);
     setCategory('office');
     setWidth('1.00');
     setDepth('1.00');
@@ -125,19 +123,10 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
     setBusy(true);
     setError(null);
     try {
-      if (!thumbnail) {
-        setError('Thumbnail görseli seçmelisin.');
-        setBusy(false);
-        return;
-      }
+      const THREE = await import('three');
+      const thumbnailDataUrl = await renderCustomGlbTopThumbnail(THREE, data);
       const id = createCustomGlbId();
       await saveCustomGlbAsset(id, fileName, data);
-      const thumbnailDataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Thumbnail okunamadı.'));
-        reader.onload = () => resolve(String(reader.result));
-        reader.readAsDataURL(thumbnail);
-      });
       const catalogItem = {
         type: id,
         name: displayName.trim().slice(0, 100),
@@ -222,7 +211,7 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
               <div>
                 <div style={{ fontSize: 18, fontWeight: 900, fontFamily: 'var(--pc-font-display)' }}>GLB Eşya Ekle</div>
                 <div style={{ marginTop: 4, opacity: 0.68, fontSize: 12 }}>
-                  Model bu cihazın tarayıcı depolamasında tutulur ve aktif kata eklenir.
+                  Model bu cihazın tarayıcı depolamasında tutulur; katalog ve 2D plan için üstten görünüm otomatik oluşturulur.
                 </div>
               </div>
               <button
@@ -323,12 +312,6 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
                     </label>
                   ))}
                 </div>
-
-                <label style={{ marginTop: 12, display: 'grid', gap: 6, fontSize: 11, opacity: 0.9 }}>
-                  Thumbnail görseli
-                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setThumbnail(event.target.files?.[0] ?? null)} style={{ fontSize: 11 }} />
-                  {thumbnail && <span>{thumbnail.name}</span>}
-                </label>
 
                 <div
                   style={{

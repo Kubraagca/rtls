@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Icon, iconForItem } from '../plotcraft/icon';
+import { getPlanSprite, onPlanSpritesReady } from '../three/plan-sprites';
 import { Minimap } from './minimap';
 import type { FurnitureItem, RoomLayout } from '../lib/types';
 import type { FloorLayout } from '../lib/types';
@@ -49,6 +51,8 @@ export interface ViewportProps {
 export function Viewport(props: ViewportProps): JSX.Element {
   const showLoading = !props.isReady && !props.error;
   const showError = Boolean(props.error);
+  const [, setPlanPreviewRevision] = useState(0);
+  useEffect(() => onPlanSpritesReady(() => setPlanPreviewRevision((revision) => revision + 1)), []);
 
   const handleDragOver = (event: React.DragEvent<HTMLCanvasElement>) => {
     if (!props.onCatalogDrop) return;
@@ -310,23 +314,24 @@ interface HoverTooltipProps {
   containerRef: React.RefObject<HTMLCanvasElement>;
 }
 
-function HoverTooltip({ hover, containerRef }: HoverTooltipProps): JSX.Element | null {
+function HoverTooltip({ hover, containerRef, showIsometric = false }: HoverTooltipProps & { showIsometric?: boolean }): JSX.Element | null {
   const canvas = containerRef.current;
   if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
   const x = Math.max(8, Math.min(rect.width - 220, hover.clientX - rect.left + 14));
   const y = Math.max(8, Math.min(rect.height - 70, hover.clientY - rect.top + 14));
+  const isometric = showIsometric ? getPlanSprite(hover.item)?.isometricCanvas : undefined;
 
   return (
     <div
-      className="pointer-events-none pc-glass pc-glass--dark"
+      className="pointer-events-none pc-glass pc-glass--dark pc-hover-tooltip"
       style={{
         position: 'absolute',
         left: x,
         top: y,
         padding: '8px 12px',
         borderRadius: 12,
-        minWidth: 140,
+        minWidth: showIsometric ? 150 : 140,
       }}
     >
       <p
@@ -338,7 +343,7 @@ function HoverTooltip({ hover, containerRef }: HoverTooltipProps): JSX.Element |
           fontFamily: 'var(--pc-font-display)',
           fontWeight: 700,
           fontSize: 12,
-          color: 'var(--pc-paper)',
+          color: 'var(--pc-ink)',
         }}
       >
         <Icon name={iconForItem(hover.item.type, hover.item.category)} size={14} />
@@ -354,6 +359,13 @@ function HoverTooltip({ hover, containerRef }: HoverTooltipProps): JSX.Element |
       >
         {hover.item.width.toFixed(2)}m × {hover.item.depth.toFixed(2)}m
       </p>
+      {showIsometric && isometric && (
+        <img
+          src={isometric.toDataURL('image/png')}
+          alt={`${hover.item.name} izometrik görünüm`}
+          style={{ display: 'block', width: 150, height: 112, objectFit: 'contain', margin: '7px auto 0' }}
+        />
+      )}
     </div>
   );
 }
@@ -539,8 +551,12 @@ function ViewportOverlays(props: ViewportProps): JSX.Element {
         </div>
       )}
 
-      {props.hover && props.hover.item.id !== props.selectedItem?.id && (
-        <HoverTooltip hover={props.hover} containerRef={props.canvasRef} />
+      {props.hover && (props.view2D || props.hover.item.id !== props.selectedItem?.id) && (
+        <HoverTooltip
+          hover={props.hover}
+          containerRef={props.view2D ? props.canvas2DRef : props.canvasRef}
+          showIsometric={props.view2D}
+        />
       )}
     </>
   );

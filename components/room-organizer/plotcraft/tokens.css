@@ -103,6 +103,14 @@
   color: var(--pc-paper);
 }
 
+.pc-hover-tooltip {
+  background: rgba(245, 248, 250, 0.96) !important;
+  border-color: rgba(148, 163, 184, 0.48);
+  color: var(--pc-ink);
+  box-shadow: 0 10px 28px rgba(38, 55, 68, 0.18);
+}
+.pc-hover-tooltip .pc-blurb { color: #58707d; }
+
 /* Recessed well inside a glass panel — dark inset chrome shared by toggle
    rows and swatch/pattern grids. Grid sites override radius, padding and
    shadow depth inline where they differ. */

@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Next preserves JSX for its own compiler; component tests need it transformed.
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     // Most modules under test are React-free and Three.js-free pure logic, so
     // the fast Node environment is the default. The few React-facing suites

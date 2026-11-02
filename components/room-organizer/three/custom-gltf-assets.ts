@@ -125,6 +125,63 @@ export async function inspectCustomGlbScene(
   return info;
 }
 
+/** Render a transparent orthographic top view for a custom GLB catalogue tile. */
+export async function renderCustomGlbTopThumbnail(
+  THREE: typeof import('three'),
+  data: ArrayBuffer,
+): Promise<string> {
+  const gltf = await parseGlb(data.slice(0));
+  const model = gltf.scene;
+  const bounds = new THREE.Box3().setFromObject(model);
+  if (bounds.isEmpty()) throw new Error('GLB içinde görüntülenebilir 3D mesh bulunamadı.');
+
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  model.position.sub(center);
+  model.updateMatrixWorld(true);
+
+  const footprint = Math.max(size.x, size.z, 0.05) * 1.16;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    alpha: true,
+    antialias: true,
+    preserveDrawingBuffer: true,
+    powerPreference: 'low-power',
+  });
+  renderer.setPixelRatio(1);
+  renderer.setSize(256, 256, false);
+  renderer.setClearColor(0x000000, 0);
+
+  const scene = new THREE.Scene();
+  scene.add(model);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8d9aa5, 2.2));
+  const key = new THREE.DirectionalLight(0xffffff, 2.4);
+  key.position.set(-3, 8, 4);
+  scene.add(key);
+  const camera = new THREE.OrthographicCamera(
+    -footprint / 2, footprint / 2, footprint / 2, -footprint / 2, 0.01, 1000,
+  );
+  camera.position.set(0, size.y + 10, 0);
+  camera.up.set(0, 0, -1);
+  camera.lookAt(0, 0, 0);
+
+  try {
+    renderer.render(scene, camera);
+    return canvas.toDataURL('image/png');
+  } finally {
+    scene.remove(model);
+    renderer.dispose();
+    model.traverse((node) => {
+      const mesh = node as ThreeNS.Mesh;
+      mesh.geometry?.dispose?.();
+      const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+      for (const material of materials) material.dispose();
+    });
+  }
+}
+
 export function loadStoredCustomGltfAsset(id: string): Promise<ThreeNS.Object3D | null> {
   const cached = sourceCache.get(id);
   if (cached) return cached;
@@ -144,20 +201,34 @@ export function fitStoredCustomGltfAsset(
   item: { width: number; depth: number; height: number }
 ): ThreeNS.Object3D {
   const model = cloneSkinned(source);
+  // Saved layouts can pre-date the custom-item size guard. Always sanitise the
+  // target dimensions here as a final line of defence; otherwise one stale
+  // 10–50 metre catalog value makes the uploaded model room-sized again.
+  const target = normaliseCustomItemDimensions(item);
+
+  // SkeletonUtils.clone() copies the hierarchy but does not guarantee fresh
+  // world matrices when the clone is not attached to a scene. Recompute them
+  // before measuring, otherwise a stale source matrix can produce an invalid
+  // scale (most noticeable with GLBs exported with a root transform).
+  model.position.set(0, 0, 0);
+  model.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(model);
   const size = bounds.getSize(new THREE.Vector3());
   const scale = Math.min(
-    item.width / Math.max(size.x, 0.001),
-    item.height / Math.max(size.y, 0.001),
-    item.depth / Math.max(size.z, 0.001)
+    target.width / Math.max(size.x, 0.001),
+    target.height / Math.max(size.y, 0.001),
+    target.depth / Math.max(size.z, 0.001)
   );
-  model.scale.setScalar(scale);
+  model.scale.setScalar(Number.isFinite(scale) && scale > 0 ? scale : 1);
+  model.updateMatrixWorld(true);
 
   const fitted = new THREE.Box3().setFromObject(model);
   const center = fitted.getCenter(new THREE.Vector3());
   model.position.x -= center.x;
   model.position.y -= fitted.min.y;
   model.position.z -= center.z;
+  model.updateMatrixWorld(true);
+  model.userData.customFitDimensions = target;
   model.traverse((node) => {
     if ('castShadow' in node) node.castShadow = true;
     if ('receiveShadow' in node) node.receiveShadow = true;

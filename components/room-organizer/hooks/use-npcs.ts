@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { getRtlsPersonItems } from '../lib/rtls-person-items';
+import { getRtlsSeatAnchors, isRtlsSeat, type RtlsSeatAnchor } from '../lib/rtls-seating';
 import {
   cloneAndFitOfficeAvatar,
   loadFemaleOfficeAvatar,
@@ -19,7 +20,7 @@ type ThreeModule = typeof import('three');
 
 type RtlsAvatarMode = 'walking' | 'idle' | 'working';
 type AvatarVariant = 'male' | 'female';
-type TargetKind = 'desk' | 'roam';
+type TargetKind = 'seat' | 'roam';
 type RenderMode = 'full' | 'proxy' | 'hidden';
 
 const NPC_TAG = 'npc';
@@ -41,6 +42,8 @@ const AVATAR_AVOIDANCE_RADIUS = 0.18;
 const AVATAR_STUCK_IDLE_DELAY_SECONDS = 3;
 
 interface RtlsStation {
+  id: string;
+  sourceId: string;
   x: number;
   z: number;
   faceYaw: number;
@@ -71,6 +74,7 @@ interface NpcState {
   position: { x: number; z: number };
   target: { x: number; z: number };
   targetKind: TargetKind;
+  targetSeatId?: string;
   targetFaceYaw?: number;
   speed: number;
   phase: number;
@@ -87,6 +91,7 @@ interface NpcState {
 }
 
 interface AvatarObstacle {
+  id: string;
   x: number;
   z: number;
   halfWidth: number;
@@ -230,9 +235,12 @@ export function useNpcs(options: UseNpcsOptions): void {
     const personItems = getRtlsPersonItems(items);
     const stations = buildRtlsStations(items, halfW, halfD);
     const obstacles = buildAvatarObstacles(items);
-    const npcs: NpcState[] = personItems.map((item, index) =>
-      createNpc(THREE, halfW, halfD, floorY, index, stations, item)
-    );
+    const reservedSeatIds = new Set<string>();
+    const npcs: NpcState[] = personItems.map((item, index) => {
+      const npc = createNpc(THREE, halfW, halfD, floorY, index, stations, item, reservedSeatIds);
+      if (npc.targetSeatId) reservedSeatIds.add(npc.targetSeatId);
+      return npc;
+    });
     stateRef.current = npcs;
 
     if (npcs.length === 0) {
@@ -411,30 +419,15 @@ export function useNpcs(options: UseNpcsOptions): void {
 }
 
 function buildRtlsStations(items: readonly FurnitureItem[], halfW: number, halfD: number): RtlsStation[] {
-  // Sitting targets must be real seats. A workstation by itself is not a
-  // chair, so never derive a sitting target from the desk's approximate
-  // offset; that was causing avatars to sit in empty spaces.
-  const seats = items.filter((item) => item.position && isAvatarSeat(item.type));
-  return seats.map((seat) => {
-      const yaw = seat.rotation ?? 0;
-      return {
-        x: clamp(seat.position!.x, -halfW, halfW),
-        z: clamp(seat.position!.z, -halfD, halfD),
-        // The chair back is modelled on local -Z, so the person faces local +Z.
-        faceYaw: normalizeAngle(yaw),
-      };
-    });
-}
-
-function isAvatarSeat(type: string): boolean {
-  return type === 'office-chair'
-    || type === 'conference-chair'
-    || type === 'chair'
-    || type === 'dining-chair'
-    || type === 'armchair'
-    || type === 'sofa'
-    || type === 'gltf-chair'
-    || type === 'gltf-sofa';
+  // Sitting targets must be explicit seat anchors. A workstation by itself is
+  // never enough: the avatar must be placed on a real chair/sofa/bench.
+  return getRtlsSeatAnchors(items).map((seat: RtlsSeatAnchor) => ({
+    id: seat.id,
+    sourceId: seat.sourceId,
+    x: clamp(seat.x, -halfW, halfW),
+    z: clamp(seat.z, -halfD, halfD),
+    faceYaw: normalizeAngle(seat.faceYaw),
+  }));
 }
 
 function createNpc(
@@ -444,7 +437,8 @@ function createNpc(
   floorY: number,
   index: number,
   stations: readonly RtlsStation[],
-  sourceItem: FurnitureItem
+  sourceItem: FurnitureItem,
+  reservedSeatIds: ReadonlySet<string>
 ): NpcState {
   const group = new THREE.Group();
   group.userData.type = NPC_TAG;
@@ -460,12 +454,13 @@ function createNpc(
   group.position.set(position.x, floorY, position.z);
   group.rotation.y = sourceItem.rotation ?? 0;
 
-  const initial = pickTarget(index, stations, halfW, halfD, true);
+  const initial = pickTarget(index, stations, halfW, halfD, true, reservedSeatIds);
   return {
     group,
     position,
     target: { x: initial.x, z: initial.z },
     targetKind: initial.kind,
+    targetSeatId: initial.seatId,
     targetFaceYaw: initial.faceYaw,
     // The female Mixamo walk cycle is authored at a normal walking cadence;
     // keep its world travel speed in sync so it does not look like the same
@@ -533,7 +528,13 @@ function stepSimulation(
         }
 
         if (npc.targetFaceYaw !== undefined) npc.yaw = npc.targetFaceYaw;
-        if (npc.targetKind === 'desk') {
+        const station = npc.targetSeatId
+          ? stations.find((candidate) => candidate.id === npc.targetSeatId)
+          : undefined;
+        if (npc.targetKind === 'seat' && station && Math.hypot(
+          station.x - npc.position.x,
+          station.z - npc.position.z
+        ) <= 0.18) {
           setMode(npc, 'working', now);
           npc.modeUntil = now + 5200 + (npc.index % 8) * 420;
         } else {
@@ -590,15 +591,18 @@ function stepSimulation(
             obstacles,
             halfW,
             halfD,
-            npc.targetKind === 'desk'
+            npc.targetKind === 'seat',
+            npc.targetSeatId
           );
           if (route.length > 1) {
             npc.navigationPath = route.slice(1);
             npc.target = npc.navigationPath.shift()!;
           } else {
-            const next = pickTarget(npc.index + 1, stations, halfW, halfD, false);
+            npc.targetSeatId = undefined;
+            const next = pickTarget(npc.index + 1, stations, halfW, halfD, false, occupiedSeatIds(npcs));
             npc.target = { x: next.x, z: next.z };
             npc.targetKind = next.kind;
+            npc.targetSeatId = next.seatId;
             npc.targetFaceYaw = next.faceYaw;
           }
           npc.blockedFor = 0;
@@ -641,9 +645,11 @@ function stepSimulation(
     npc.group.rotation.y = npc.yaw;
     if (now < npc.modeUntil) continue;
 
-    const next = pickTarget(npc.index, stations, halfW, halfD, npc.mode === 'working');
+    npc.targetSeatId = undefined;
+    const next = pickTarget(npc.index, stations, halfW, halfD, npc.mode === 'working', occupiedSeatIds(npcs));
     npc.target = { x: next.x, z: next.z };
     npc.targetKind = next.kind;
+    npc.targetSeatId = next.seatId;
     npc.targetFaceYaw = next.faceYaw;
     setMode(npc, 'walking', now);
     changed = true;
@@ -792,27 +798,28 @@ function createFullAvatarSlot(
 
 function buildAvatarObstacles(items: readonly FurnitureItem[]): AvatarObstacle[] {
   return items
-    .filter((item) => item.position && !isNonBlockingAvatarItem(item.type))
+    .filter((item) => item.position && !isNonBlockingAvatarItem(item))
     .map((item) => ({
+      id: item.id,
       x: item.position!.x,
       z: item.position!.z,
       halfWidth: Math.max(0.08, item.width / 2),
       halfDepth: Math.max(0.08, item.depth / 2),
       rotation: item.rotation ?? 0,
-      isSeat: isAvatarSeat(item.type),
+      isSeat: isRtlsSeat(item),
     }));
 }
 
-function isNonBlockingAvatarItem(type: string): boolean {
-  return type === 'office-avatar'
-    || type === 'female-office-avatar'
-    || type === 'custom-glb'
-    || type === 'door'
-    || type === 'window'
-    || type === 'rtls-gateway'
-    || type === 'rtls-beacon'
-    || type === 'wifi'
-    || type === 'security-camera';
+function isNonBlockingAvatarItem(item: FurnitureItem): boolean {
+  return item.type === 'office-avatar'
+    || item.type === 'female-office-avatar'
+    || (item.type === 'custom-glb' && !isRtlsSeat(item))
+    || item.type === 'door'
+    || item.type === 'window'
+    || item.type === 'rtls-gateway'
+    || item.type === 'rtls-beacon'
+    || item.type === 'wifi'
+    || item.type === 'security-camera';
 }
 
 function avatarMovementBlocked(
@@ -824,11 +831,17 @@ function avatarMovementBlocked(
   // A seat is solid while walking, except for the selected target's small
   // approach zone. This also handles chairs tucked under a desk: the avatar
   // can complete the final approach without making every desk non-solid.
-  if (npc.targetKind === 'desk') {
+  if (npc.targetKind === 'seat') {
     return avatarPositionBlocked(
       x,
       z,
-      obstacles.filter((obstacle) => !isTargetApproachObstacle(obstacle, npc.target, x, z))
+      obstacles.filter((obstacle) => !isTargetApproachObstacle(
+        obstacle,
+        npc.target,
+        x,
+        z,
+        npc.targetSeatId
+      ))
     );
   }
   return avatarPositionBlocked(x, z, obstacles);
@@ -838,11 +851,14 @@ function isTargetApproachObstacle(
   obstacle: AvatarObstacle,
   target: { x: number; z: number },
   x: number,
-  z: number
+  z: number,
+  targetSeatId?: string
 ): boolean {
-  const targetIsThisSeat = obstacle.isSeat
-    && Math.hypot(obstacle.x - target.x, obstacle.z - target.z) <= 0.12;
   const nearTarget = Math.hypot(x - target.x, z - target.z) <= 0.90;
+  const targetIsThisSeat = obstacle.isSeat
+    && nearTarget
+    && (obstacle.id === targetSeatId?.split(':seat-')[0]
+      || Math.hypot(obstacle.x - target.x, obstacle.z - target.z) <= 0.12);
   const obstacleNearTarget = Math.hypot(obstacle.x - target.x, obstacle.z - target.z) <= 1.00;
   return targetIsThisSeat || (nearTarget && obstacleNearTarget);
 }
@@ -880,7 +896,8 @@ function buildAvatarRoute(
   obstacles: readonly AvatarObstacle[],
   halfW: number,
   halfD: number,
-  allowSeatTarget: boolean
+  allowSeatTarget: boolean,
+  targetSeatId?: string
 ): Array<{ x: number; z: number }> {
   const margin = AVATAR_COLLISION_RADIUS + 0.035;
   const nodes: Array<{ x: number; z: number }> = [start, target];
@@ -889,7 +906,7 @@ function buildAvatarRoute(
   // expensive in furnished rooms and could make an otherwise clear avatar
   // appear to move slowly.
   const relevantObstacles = obstacles.filter((obstacle) =>
-    !isAvatarSegmentClear(start, target, [obstacle])
+    !isAvatarSegmentClear(start, target, [obstacle], target, targetSeatId)
   );
 
   for (const obstacle of relevantObstacles) {
@@ -935,7 +952,8 @@ function buildAvatarRoute(
         nodes[current]!,
         nodes[next]!,
         relevantObstacles,
-        next === 1 && allowSeatTarget ? target : undefined
+        next === 1 && allowSeatTarget ? target : undefined,
+        next === 1 && allowSeatTarget ? targetSeatId : undefined
       )) continue;
       const dx = nodes[current]!.x - nodes[next]!.x;
       const dz = nodes[current]!.z - nodes[next]!.z;
@@ -961,7 +979,8 @@ function isAvatarSegmentClear(
   start: { x: number; z: number },
   end: { x: number; z: number },
   obstacles: readonly AvatarObstacle[],
-  seatTarget?: { x: number; z: number }
+  seatTarget?: { x: number; z: number },
+  targetSeatId?: string
 ): boolean {
   const distance = Math.hypot(end.x - start.x, end.z - start.z);
   const samples = Math.max(2, Math.ceil(distance / 0.12));
@@ -974,7 +993,8 @@ function isAvatarSegmentClear(
         obstacle,
         seatTarget,
         end.x,
-        end.z
+        end.z,
+        targetSeatId
       ))
       : obstacles;
     if (avatarPositionBlocked(x, z, blockingObstacles)) return false;
@@ -1199,6 +1219,14 @@ function toCrowdAgent(npc: NpcState): CrowdProxyAgent {
   };
 }
 
+function occupiedSeatIds(npcs: readonly NpcState[]): ReadonlySet<string> {
+  return new Set(
+    npcs
+      .map((npc) => npc.targetSeatId)
+      .filter((seatId): seatId is string => Boolean(seatId))
+  );
+}
+
 function createStatusLabel(
   THREE: ThreeModule
 ): { sprite: ThreeNS.Sprite; texture: ThreeNS.CanvasTexture; canvas: HTMLCanvasElement } {
@@ -1264,11 +1292,13 @@ function pickTarget(
   stations: readonly RtlsStation[],
   halfW: number,
   halfD: number,
-  preferDesk: boolean
-): { x: number; z: number; kind: TargetKind; faceYaw?: number } {
-  if (stations.length > 0 && (preferDesk || Math.random() < 0.48)) {
-    const station = stations[(index + Math.floor(Math.random() * stations.length)) % stations.length];
-    if (station) return { ...station, kind: 'desk' };
+  preferSeat: boolean,
+  occupied: ReadonlySet<string> = new Set<string>()
+): { x: number; z: number; kind: TargetKind; seatId?: string; faceYaw?: number } {
+  const availableStations = stations.filter((station) => !occupied.has(station.id));
+  if (availableStations.length > 0 && (preferSeat || Math.random() < 0.48)) {
+    const station = availableStations[(index + Math.floor(Math.random() * availableStations.length)) % availableStations.length];
+    if (station) return { ...station, kind: 'seat', seatId: station.id };
   }
   return {
     x: rand(-halfW * 0.84, halfW * 0.84),

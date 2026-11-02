@@ -13,6 +13,25 @@ export interface BuilderContext {
 
 export type FurnitureBuilder = (ctx: BuilderContext) => ThreeNS.Group;
 
+/** Small manufactured edge radius, with only two bevel segments. */
+export function furnitureBox(THREE: ThreeModule, width: number, height: number, depth: number): ThreeNS.BufferGeometry {
+  const radius = Math.min(0.025, width * 0.12, height * 0.2, depth * 0.12);
+  const shape = new THREE.Shape();
+  const x = width / 2 - radius;
+  const y = height / 2 - radius;
+  shape.moveTo(-x, -y);
+  shape.lineTo(x, -y);
+  shape.lineTo(x, y);
+  shape.lineTo(-x, y);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: depth - radius * 2, bevelEnabled: true,
+    bevelThickness: radius, bevelSize: radius, bevelSegments: 2, steps: 1, curveSegments: 1,
+  });
+  geometry.translate(0, 0, -depth / 2 + radius);
+  return geometry;
+}
+
 /**
  * Free the GPU resources owned by an object and all its descendants.
  *

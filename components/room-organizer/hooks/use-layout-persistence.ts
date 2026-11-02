@@ -90,11 +90,56 @@ export function useLayoutPersistence({
     // A schema-valid saved layout is user data, including edited demo layouts
     // with additional floors. Never discard it based on its display name.
     if (saved) {
+      // Upgrade the built-in office demo in-place so an existing browser save
+      // also receives the concrete palette and seated working avatars. Other
+      // user-created layouts are left untouched.
+      const isOfficeDemo = saved.name === 'RTLS Ofis - Demo Katı'
+        || saved.floors.some((floor) => floor.name === 'Ana Ofis' && floor.items.some((item) => item.id === 'ws-1'));
+      const hasWorkingAvatars = saved.floors.some((floor) =>
+        floor.items.some((item) => item.id.startsWith('worker-'))
+      );
+      const hydratedLayout = isOfficeDemo && !hasWorkingAvatars
+        ? {
+            ...saved,
+            floors: saved.floors.map((floor) => ({
+              ...floor,
+              floorColor: '#686d73',
+              floorPattern: 'concrete' as const,
+              items: [
+                ...floor.items,
+                {
+                  id: 'worker-1', type: 'office-avatar', category: 'people' as const,
+                  name: 'Çalışan Avatar 1', width: 0.62, depth: 0.45, height: 1.78,
+                  color: '#4f6f86', icon: '🧑‍💻', price: 0,
+                  position: { x: -6.4, z: 1.75 }, rotation: Math.PI, avatarPose: 'working' as const,
+                },
+                {
+                  id: 'worker-2', type: 'female-office-avatar', category: 'people' as const,
+                  name: 'Çalışan Avatar 2', width: 0.62, depth: 0.45, height: 1.78,
+                  color: '#9b6fa8', icon: '👩‍💻', price: 0,
+                  position: { x: -4.15, z: 1.75 }, rotation: Math.PI, avatarPose: 'working' as const,
+                },
+                {
+                  id: 'worker-3', type: 'office-avatar', category: 'people' as const,
+                  name: 'Çalışan Avatar 3', width: 0.62, depth: 0.45, height: 1.78,
+                  color: '#4f6f86', icon: '🧑‍💻', price: 0,
+                  position: { x: -6.4, z: -3.0 }, rotation: 0, avatarPose: 'working' as const,
+                },
+                {
+                  id: 'worker-4', type: 'female-office-avatar', category: 'people' as const,
+                  name: 'Çalışan Avatar 4', width: 0.62, depth: 0.45, height: 1.78,
+                  color: '#9b6fa8', icon: '👩‍💻', price: 0,
+                  position: { x: -4.15, z: -3.0 }, rotation: 0, avatarPose: 'working' as const,
+                },
+              ],
+            })),
+          }
+        : saved;
       hydrationBaseRef.current = layout;
       // As above: a stored layout that parses but throws on apply must not
       // white-screen mount.
       try {
-        onHydrate(saved);
+        onHydrate(hydratedLayout);
       } catch (error) {
         console.warn('Failed to apply saved layout:', error);
         hydrationBaseRef.current = null;

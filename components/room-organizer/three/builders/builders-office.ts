@@ -1,4 +1,4 @@
-import { type BuilderContext, material, mesh } from '../builder-utils';
+import { type BuilderContext, furnitureBox, material, mesh } from '../builder-utils';
 import type * as ThreeNS from 'three';
 
 function standardMat(
@@ -27,7 +27,7 @@ function addDeskMonitor(
   });
   const screen = mesh(
     THREE,
-    new THREE.BoxGeometry(item.width * 0.34, item.height * 0.34, 0.035),
+    furnitureBox(THREE, item.width * 0.34, item.height * 0.34, 0.035),
     dark
   );
   screen.position.set(0, item.height * 1.23, -item.depth * 0.14);
@@ -35,7 +35,7 @@ function addDeskMonitor(
 
   const display = mesh(
     THREE,
-    new THREE.BoxGeometry(item.width * 0.305, item.height * 0.27, 0.008),
+    furnitureBox(THREE, item.width * 0.305, item.height * 0.27, 0.008),
     screenMat
   );
   display.position.set(0, item.height * 1.23, -item.depth * 0.118);
@@ -45,13 +45,13 @@ function addDeskMonitor(
   stem.position.set(0, item.height * 1.0, -item.depth * 0.14);
   group.add(stem);
 
-  const base = mesh(THREE, new THREE.BoxGeometry(item.width * 0.18, 0.025, item.depth * 0.16), dark);
+  const base = mesh(THREE, furnitureBox(THREE, item.width * 0.18, 0.025, item.depth * 0.16), dark);
   base.position.set(0, item.height * 0.98, -item.depth * 0.11);
   group.add(base);
 
   const keyboard = mesh(
     THREE,
-    new THREE.BoxGeometry(item.width * 0.34, 0.018, item.depth * 0.22),
+    furnitureBox(THREE, item.width * 0.34, 0.018, item.depth * 0.22),
     standardMat(THREE, 0x303841, hasCollision, opacity, { roughness: 0.45, metalness: 0.2 })
   );
   keyboard.position.set(0, item.height * 1.01, item.depth * 0.16);
@@ -65,11 +65,11 @@ export function buildWorkstation({ THREE, item, hasCollision, baseColor, opacity
   const edge = standardMat(THREE, 0x312a25, hasCollision, opacity, { roughness: 0.55, metalness: 0.08 });
   const metal = standardMat(THREE, 0x29313a, hasCollision, opacity, { roughness: 0.32, metalness: 0.72 });
 
-  const top = mesh(THREE, new THREE.BoxGeometry(item.width, 0.055, item.depth), wood);
+  const top = mesh(THREE, furnitureBox(THREE, item.width, 0.055, item.depth), wood);
   top.position.y = item.height - 0.035;
   group.add(top);
 
-  const frontEdge = mesh(THREE, new THREE.BoxGeometry(item.width, 0.035, 0.025), edge);
+  const frontEdge = mesh(THREE, furnitureBox(THREE, item.width, 0.035, 0.025), edge);
   frontEdge.position.set(0, item.height - 0.045, item.depth / 2 + 0.006);
   group.add(frontEdge);
 
@@ -83,7 +83,7 @@ export function buildWorkstation({ THREE, item, hasCollision, baseColor, opacity
     }
   }
 
-  const crossbar = mesh(THREE, new THREE.BoxGeometry(item.width * 0.76, 0.035, 0.035), metal);
+  const crossbar = mesh(THREE, furnitureBox(THREE, item.width * 0.76, 0.035, 0.035), metal);
   crossbar.position.set(0, item.height * 0.38, -item.depth * 0.36);
   group.add(crossbar);
 
@@ -96,11 +96,11 @@ export function buildMeetingTable({ THREE, item, hasCollision, baseColor, opacit
   const topMat = standardMat(THREE, baseColor, hasCollision, opacity, { roughness: 0.42, metalness: 0.04 });
   const metal = standardMat(THREE, 0x2d343b, hasCollision, opacity, { roughness: 0.3, metalness: 0.78 });
 
-  const top = mesh(THREE, new THREE.BoxGeometry(item.width, 0.07, item.depth), topMat);
+  const top = mesh(THREE, furnitureBox(THREE, item.width, 0.07, item.depth), topMat);
   top.position.y = item.height - 0.04;
   group.add(top);
 
-  const baseGeo = new THREE.BoxGeometry(item.width * 0.12, item.height * 0.87, item.depth * 0.5);
+  const baseGeo = furnitureBox(THREE, item.width * 0.12, item.height * 0.87, item.depth * 0.5);
   for (const x of [-item.width * 0.3, item.width * 0.3]) {
     const pedestal = mesh(THREE, baseGeo, metal);
     pedestal.position.set(x, item.height * 0.44, 0);
@@ -109,7 +109,7 @@ export function buildMeetingTable({ THREE, item, hasCollision, baseColor, opacit
 
   const cableBox = mesh(
     THREE,
-    new THREE.BoxGeometry(item.width * 0.18, 0.018, item.depth * 0.18),
+    furnitureBox(THREE, item.width * 0.18, 0.018, item.depth * 0.18),
     standardMat(THREE, 0x15191d, hasCollision, opacity, { roughness: 0.35, metalness: 0.65 })
   );
   cableBox.position.set(0, item.height + 0.012, 0);
@@ -156,12 +156,12 @@ export function buildOfficeChair({ THREE, item, hasCollision, baseColor, opacity
   const dark = standardMat(THREE, 0x232a31, hasCollision, opacity, { roughness: 0.42, metalness: 0.5 });
   addOfficeChairBase(THREE, group, item, hasCollision, opacity);
 
-  const seat = mesh(THREE, new THREE.BoxGeometry(item.width * 0.78, 0.11, item.depth * 0.68), fabric);
+  const seat = mesh(THREE, furnitureBox(THREE, item.width * 0.78, 0.11, item.depth * 0.68), fabric);
   seat.position.set(0, item.height * 0.43, item.depth * 0.03);
   seat.rotation.x = -0.04;
   group.add(seat);
 
-  const back = mesh(THREE, new THREE.BoxGeometry(item.width * 0.7, item.height * 0.42, 0.09), fabric);
+  const back = mesh(THREE, furnitureBox(THREE, item.width * 0.7, item.height * 0.42, 0.09), fabric);
   back.position.set(0, item.height * 0.72, -item.depth * 0.29);
   back.rotation.x = -0.08;
   group.add(back);
@@ -171,7 +171,7 @@ export function buildOfficeChair({ THREE, item, hasCollision, baseColor, opacity
   group.add(backStem);
 
   const armPostGeo = new THREE.BoxGeometry(0.035, item.height * 0.2, 0.035);
-  const armTopGeo = new THREE.BoxGeometry(item.width * 0.22, 0.035, item.depth * 0.28);
+  const armTopGeo = furnitureBox(THREE, item.width * 0.22, 0.035, item.depth * 0.28);
   for (const x of [-item.width * 0.36, item.width * 0.36]) {
     const post = mesh(THREE, armPostGeo, dark);
     post.position.set(x, item.height * 0.52, item.depth * 0.02);
@@ -188,10 +188,10 @@ export function buildConferenceChair({ THREE, item, hasCollision, baseColor, opa
   const shell = standardMat(THREE, baseColor, hasCollision, opacity, { roughness: 0.72, metalness: 0.05 });
   const metal = standardMat(THREE, 0x343a40, hasCollision, opacity, { roughness: 0.28, metalness: 0.82 });
 
-  const seat = mesh(THREE, new THREE.BoxGeometry(item.width * 0.86, 0.08, item.depth * 0.72), shell);
+  const seat = mesh(THREE, furnitureBox(THREE, item.width * 0.86, 0.08, item.depth * 0.72), shell);
   seat.position.y = item.height * 0.48;
   group.add(seat);
-  const back = mesh(THREE, new THREE.BoxGeometry(item.width * 0.82, item.height * 0.43, 0.065), shell);
+  const back = mesh(THREE, furnitureBox(THREE, item.width * 0.82, item.height * 0.43, 0.065), shell);
   back.position.set(0, item.height * 0.72, -item.depth * 0.31);
   back.rotation.x = -0.06;
   group.add(back);
@@ -213,24 +213,24 @@ export function buildReceptionDesk({ THREE, item, hasCollision, baseColor, opaci
   const accent = standardMat(THREE, 0x8a6a47, hasCollision, opacity, { roughness: 0.5, metalness: 0.02 });
   const dark = standardMat(THREE, 0x252c33, hasCollision, opacity, { roughness: 0.36, metalness: 0.65 });
 
-  const body = mesh(THREE, new THREE.BoxGeometry(item.width, item.height * 0.72, item.depth * 0.72), shell);
+  const body = mesh(THREE, furnitureBox(THREE, item.width, item.height * 0.72, item.depth * 0.72), shell);
   body.position.set(0, item.height * 0.36, item.depth * 0.08);
   group.add(body);
 
-  const worktop = mesh(THREE, new THREE.BoxGeometry(item.width * 0.92, 0.055, item.depth * 0.72), accent);
+  const worktop = mesh(THREE, furnitureBox(THREE, item.width * 0.92, 0.055, item.depth * 0.72), accent);
   worktop.position.set(0, item.height * 0.72, item.depth * 0.02);
   group.add(worktop);
 
-  const privacy = mesh(THREE, new THREE.BoxGeometry(item.width, item.height * 0.38, 0.08), shell);
+  const privacy = mesh(THREE, furnitureBox(THREE, item.width, item.height * 0.38, 0.08), shell);
   privacy.position.set(0, item.height * 0.88, item.depth * 0.34);
   group.add(privacy);
 
-  const cap = mesh(THREE, new THREE.BoxGeometry(item.width * 1.03, 0.06, item.depth * 0.28), accent);
+  const cap = mesh(THREE, furnitureBox(THREE, item.width * 1.03, 0.06, item.depth * 0.28), accent);
   cap.position.set(0, item.height * 1.08, item.depth * 0.32);
   group.add(cap);
 
   for (let i = -2; i <= 2; i += 1) {
-    const inset = mesh(THREE, new THREE.BoxGeometry(item.width * 0.13, item.height * 0.46, 0.015), dark);
+    const inset = mesh(THREE, furnitureBox(THREE, item.width * 0.13, item.height * 0.46, 0.015), dark);
     inset.position.set(i * item.width * 0.17, item.height * 0.38, item.depth * 0.445);
     group.add(inset);
   }
@@ -241,17 +241,17 @@ export function buildFilingCabinet({ THREE, item, hasCollision, baseColor, opaci
   const group = new THREE.Group();
   const body = standardMat(THREE, baseColor, hasCollision, opacity, { roughness: 0.42, metalness: 0.48 });
   const trim = standardMat(THREE, 0x59636d, hasCollision, opacity, { roughness: 0.28, metalness: 0.72 });
-  const shell = mesh(THREE, new THREE.BoxGeometry(item.width, item.height, item.depth), body);
+  const shell = mesh(THREE, furnitureBox(THREE, item.width, item.height, item.depth), body);
   shell.position.y = item.height / 2;
   group.add(shell);
 
   const drawerCount = 4;
   for (let i = 0; i < drawerCount; i += 1) {
     const h = item.height / drawerCount;
-    const front = mesh(THREE, new THREE.BoxGeometry(item.width * 0.9, h * 0.83, 0.025), body);
+    const front = mesh(THREE, furnitureBox(THREE, item.width * 0.9, h * 0.83, 0.025), body);
     front.position.set(0, h * (i + 0.5), item.depth / 2 + 0.014);
     group.add(front);
-    const handle = mesh(THREE, new THREE.BoxGeometry(item.width * 0.24, 0.025, 0.028), trim);
+    const handle = mesh(THREE, furnitureBox(THREE, item.width * 0.24, 0.025, 0.028), trim);
     handle.position.set(0, h * (i + 0.5) + h * 0.18, item.depth / 2 + 0.038);
     group.add(handle);
   }
@@ -264,24 +264,24 @@ export function buildPrinter({ THREE, item, hasCollision, baseColor, opacity }: 
   const dark = standardMat(THREE, 0x20262c, hasCollision, opacity, { roughness: 0.36, metalness: 0.4 });
   const paperMat = standardMat(THREE, 0xf5f7f8, hasCollision, opacity, { roughness: 0.9, metalness: 0 });
 
-  const lower = mesh(THREE, new THREE.BoxGeometry(item.width, item.height * 0.56, item.depth), shell);
+  const lower = mesh(THREE, furnitureBox(THREE, item.width, item.height * 0.56, item.depth), shell);
   lower.position.y = item.height * 0.28;
   group.add(lower);
-  const upper = mesh(THREE, new THREE.BoxGeometry(item.width * 0.9, item.height * 0.34, item.depth * 0.82), shell);
+  const upper = mesh(THREE, furnitureBox(THREE, item.width * 0.9, item.height * 0.34, item.depth * 0.82), shell);
   upper.position.set(0, item.height * 0.68, -item.depth * 0.05);
   group.add(upper);
 
-  const output = mesh(THREE, new THREE.BoxGeometry(item.width * 0.58, 0.025, item.depth * 0.32), dark);
+  const output = mesh(THREE, furnitureBox(THREE, item.width * 0.58, 0.025, item.depth * 0.32), dark);
   output.position.set(0, item.height * 0.47, item.depth * 0.42);
   output.rotation.x = -0.12;
   group.add(output);
 
-  const paper = mesh(THREE, new THREE.BoxGeometry(item.width * 0.52, 0.01, item.depth * 0.3), paperMat);
+  const paper = mesh(THREE, furnitureBox(THREE, item.width * 0.52, 0.01, item.depth * 0.3), paperMat);
   paper.position.set(0, item.height * 0.48, item.depth * 0.47);
   paper.rotation.x = -0.12;
   group.add(paper);
 
-  const panel = mesh(THREE, new THREE.BoxGeometry(item.width * 0.26, 0.025, item.depth * 0.18), dark);
+  const panel = mesh(THREE, furnitureBox(THREE, item.width * 0.26, 0.025, item.depth * 0.18), dark);
   panel.position.set(item.width * 0.25, item.height * 0.88, item.depth * 0.24);
   panel.rotation.x = -0.28;
   group.add(panel);
@@ -298,12 +298,12 @@ export function buildWhiteboard({ THREE, item, hasCollision, opacity }: BuilderC
   // standing-eye level instead of starting on the floor.
   const bottom = 0.86;
   const top = bottom + item.height;
-  const panel = mesh(THREE, new THREE.BoxGeometry(item.width * 0.94, item.height * 0.9, item.depth * 0.45), board);
+  const panel = mesh(THREE, furnitureBox(THREE, item.width * 0.94, item.height * 0.9, item.depth * 0.45), board);
   panel.position.y = bottom + item.height * 0.5;
   group.add(panel);
 
   const t = Math.max(0.025, item.height * 0.025);
-  const horiz = new THREE.BoxGeometry(item.width, t, item.depth);
+  const horiz = furnitureBox(THREE, item.width, t, item.depth);
   for (const y of [bottom, top]) {
     const bar = mesh(THREE, horiz, frame);
     bar.position.y = y;
@@ -315,7 +315,7 @@ export function buildWhiteboard({ THREE, item, hasCollision, opacity }: BuilderC
     bar.position.set(x, bottom + item.height * 0.5, 0);
     group.add(bar);
   }
-  const tray = mesh(THREE, new THREE.BoxGeometry(item.width * 0.5, 0.025, item.depth * 2.2), frame);
+  const tray = mesh(THREE, furnitureBox(THREE, item.width * 0.5, 0.025, item.depth * 2.2), frame);
   tray.position.set(0, bottom - 0.025, item.depth * 0.75);
   group.add(tray);
   const pen = mesh(THREE, new THREE.CylinderGeometry(0.012, 0.012, item.width * 0.25, 10), marker);
@@ -340,7 +340,7 @@ export function buildPartition({ THREE, item, hasCollision, opacity }: BuilderCo
     side: THREE.DoubleSide,
   });
 
-  const panel = mesh(THREE, new THREE.BoxGeometry(item.width * 0.94, item.height * 0.9, item.depth * 0.35), glass);
+  const panel = mesh(THREE, furnitureBox(THREE, item.width * 0.94, item.height * 0.9, item.depth * 0.35), glass);
   panel.position.y = item.height * 0.52;
   group.add(panel);
 
@@ -351,7 +351,7 @@ export function buildPartition({ THREE, item, hasCollision, opacity }: BuilderCo
     side.position.set(x, item.height / 2, 0);
     group.add(side);
   }
-  const railGeo = new THREE.BoxGeometry(item.width, t, item.depth);
+  const railGeo = furnitureBox(THREE, item.width, t, item.depth);
   for (const y of [t / 2, item.height - t / 2]) {
     const rail = mesh(THREE, railGeo, frame);
     rail.position.y = y;
@@ -371,10 +371,10 @@ export function buildCeilingPanelLight({ THREE, item, hasCollision, opacity }: B
     emissiveIntensity: lightOn ? 1.9 : 0.04,
   });
   const y = Math.max(2.55, Math.min(2.92, item.height));
-  const frame = mesh(THREE, new THREE.BoxGeometry(item.width, 0.055, item.depth), rim);
+  const frame = mesh(THREE, furnitureBox(THREE, item.width, 0.055, item.depth), rim);
   frame.position.y = y;
   group.add(frame);
-  const lightPanel = mesh(THREE, new THREE.BoxGeometry(item.width * 0.9, 0.018, item.depth * 0.82), diffuser);
+  const lightPanel = mesh(THREE, furnitureBox(THREE, item.width * 0.9, 0.018, item.depth * 0.82), diffuser);
   lightPanel.position.y = y - 0.035;
   group.add(lightPanel);
 
@@ -394,10 +394,10 @@ export function buildRtlsGateway({ THREE, item, hasCollision, opacity }: Builder
   const led = standardMat(THREE, 0x2ee59d, hasCollision, opacity, { emissive: 0x2ee59d, emissiveIntensity: 1.2 });
   const y = Math.max(2.2, Math.min(2.75, item.height));
 
-  const body = mesh(THREE, new THREE.BoxGeometry(item.width, 0.09, item.depth), shell);
+  const body = mesh(THREE, furnitureBox(THREE, item.width, 0.09, item.depth), shell);
   body.position.y = y;
   group.add(body);
-  const underside = mesh(THREE, new THREE.BoxGeometry(item.width * 0.8, 0.025, item.depth * 0.78), dark);
+  const underside = mesh(THREE, furnitureBox(THREE, item.width * 0.8, 0.025, item.depth * 0.78), dark);
   underside.position.y = y - 0.058;
   group.add(underside);
   const status = mesh(THREE, new THREE.SphereGeometry(0.018, 12, 10), led);
@@ -411,7 +411,7 @@ export function buildStorageLocker({ THREE, item, hasCollision, baseColor, opaci
   const group = new THREE.Group();
   const body = standardMat(THREE, baseColor, hasCollision, opacity, { roughness: 0.48, metalness: 0.62 });
   const trim = standardMat(THREE, 0x6b7782, hasCollision, opacity, { roughness: 0.32, metalness: 0.72 });
-  const shell = mesh(THREE, new THREE.BoxGeometry(item.width, item.height, item.depth), body);
+  const shell = mesh(THREE, furnitureBox(THREE, item.width, item.height, item.depth), body);
   shell.position.y = item.height / 2;
   group.add(shell);
 
@@ -451,16 +451,16 @@ export function buildCoffeeMachine({ THREE, item, hasCollision, opacity }: Build
   });
   const accent = standardMat(THREE, 0x33d17a, hasCollision, opacity, { emissive: 0x33d17a, emissiveIntensity: 0.6 });
 
-  const body = mesh(THREE, new THREE.BoxGeometry(item.width, item.height * 0.95, item.depth), dark);
+  const body = mesh(THREE, furnitureBox(THREE, item.width, item.height * 0.95, item.depth), dark);
   body.position.y = item.height * 0.475;
   group.add(body);
-  const top = mesh(THREE, new THREE.BoxGeometry(item.width * 0.92, 0.022, item.depth * 0.84), metal);
+  const top = mesh(THREE, furnitureBox(THREE, item.width * 0.92, 0.022, item.depth * 0.84), metal);
   top.position.y = item.height * 0.97;
   group.add(top);
-  const panel = mesh(THREE, new THREE.BoxGeometry(item.width * 0.48, item.height * 0.18, 0.015), metal);
+  const panel = mesh(THREE, furnitureBox(THREE, item.width * 0.48, item.height * 0.18, 0.015), metal);
   panel.position.set(0, item.height * 0.72, item.depth / 2 + 0.012);
   group.add(panel);
-  const led = mesh(THREE, new THREE.BoxGeometry(item.width * 0.16, 0.022, 0.012), accent);
+  const led = mesh(THREE, furnitureBox(THREE, item.width * 0.16, 0.022, 0.012), accent);
   led.position.set(0, item.height * 0.73, item.depth / 2 + 0.021);
   group.add(led);
   const cup = mesh(THREE, new THREE.CylinderGeometry(item.width * 0.11, item.width * 0.095, item.height * 0.24, 14), glass);
@@ -487,16 +487,16 @@ export function buildWaterCooler({ THREE, item, hasCollision, opacity }: Builder
     thickness: 0.08,
     ior: 1.33,
   });
-  const body = mesh(THREE, new THREE.BoxGeometry(item.width * 0.86, item.height * 0.68, item.depth * 0.82), shell);
+  const body = mesh(THREE, furnitureBox(THREE, item.width * 0.86, item.height * 0.68, item.depth * 0.82), shell);
   body.position.y = item.height * 0.34;
   group.add(body);
-  const alcove = mesh(THREE, new THREE.BoxGeometry(item.width * 0.42, item.height * 0.22, item.depth * 0.18), dark);
+  const alcove = mesh(THREE, furnitureBox(THREE, item.width * 0.42, item.height * 0.22, item.depth * 0.18), dark);
   alcove.position.set(0, item.height * 0.36, item.depth * 0.18);
   group.add(alcove);
   const bottle = mesh(THREE, new THREE.CylinderGeometry(item.width * 0.22, item.width * 0.18, item.height * 0.34, 18), water);
   bottle.position.y = item.height * 0.77;
   group.add(bottle);
-  const dispenser = mesh(THREE, new THREE.BoxGeometry(item.width * 0.48, 0.05, item.depth * 0.32), shell);
+  const dispenser = mesh(THREE, furnitureBox(THREE, item.width * 0.48, 0.05, item.depth * 0.32), shell);
   dispenser.position.set(0, item.height * 0.56, 0);
   group.add(dispenser);
   for (const [x, color] of [[-0.05, 0x4aa3ff], [0.05, 0xff5a5a]] as const) {
@@ -528,7 +528,7 @@ export function buildCoatRack({ THREE, item, hasCollision, baseColor, opacity }:
   }
   for (let i = 0; i < 4; i += 1) {
     const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    const foot = mesh(THREE, new THREE.BoxGeometry(item.width * 0.38, 0.028, 0.04), wood);
+    const foot = mesh(THREE, furnitureBox(THREE, item.width * 0.38, 0.028, 0.04), wood);
     foot.position.set(Math.cos(angle) * item.width * 0.12, 0.03, Math.sin(angle) * item.width * 0.12);
     foot.rotation.y = angle;
     group.add(foot);
@@ -558,13 +558,13 @@ export function buildAcousticPanel({ THREE, item, hasCollision, baseColor, opaci
   const fabric = standardMat(THREE, baseColor, hasCollision, opacity, { roughness: 0.92, metalness: 0.01 });
   const frame = standardMat(THREE, 0x434b53, hasCollision, opacity, { roughness: 0.38, metalness: 0.28 });
   const bottom = 1.1;
-  const panel = mesh(THREE, new THREE.BoxGeometry(item.width * 0.96, item.height * 0.9, item.depth * 0.8), fabric);
+  const panel = mesh(THREE, furnitureBox(THREE, item.width * 0.96, item.height * 0.9, item.depth * 0.8), fabric);
   panel.position.y = bottom + item.height * 0.45;
   group.add(panel);
-  const railTop = mesh(THREE, new THREE.BoxGeometry(item.width, 0.025, item.depth), frame);
+  const railTop = mesh(THREE, furnitureBox(THREE, item.width, 0.025, item.depth), frame);
   railTop.position.y = bottom + item.height * 0.92;
   group.add(railTop);
-  const railBottom = mesh(THREE, new THREE.BoxGeometry(item.width, 0.025, item.depth), frame);
+  const railBottom = mesh(THREE, furnitureBox(THREE, item.width, 0.025, item.depth), frame);
   railBottom.position.y = bottom - 0.01;
   group.add(railBottom);
   return group;

@@ -5,6 +5,7 @@ import { hasCollisions } from '../lib/geometry';
 import { scheduleAssetLoad } from '../lib/asset-load-queue';
 import { ROOM_WALL_HEIGHT_METERS } from '../lib/constants';
 import { isRtlsPersonItem } from '../lib/rtls-person-items';
+import { findRtlsSeatAnchor } from '../lib/rtls-seating';
 import { useCatalogRegistry } from '../lib/catalog-registry';
 import { FLOOR_HEIGHT_METERS } from '../lib/types';
 import { disposeObject, removeAndDispose } from '../three/builder-utils';
@@ -25,9 +26,12 @@ import { clearMeasurement, renderMeasurement } from '../three/measurement';
 import {
   cloneAndFitOfficeAvatar,
   loadFemaleOfficeIdleAvatar,
+  loadFemaleOfficeSittingAvatar,
   loadOfficeIdleAvatar,
+  loadOfficeSittingAvatar,
 } from '../three/office-avatar';
 import { setOutdoorVisible } from '../three/outdoor';
+import { queuePlanSprite } from '../three/plan-sprites';
 import { buildRoof, removeRoof } from '../three/roof';
 import { ROOM_OBJECT_TAGS, applyWallDisplay, buildRoom, clearFloorPlanImageCache, removeTagged } from '../three/room-builder';
 import { addSignalOverlays } from '../three/signal-overlay';
@@ -217,6 +221,35 @@ function ghostifyGroup(group: import('three').Object3D, opacity = 0.12): void {
   });
 }
 
+/**
+ * Identifies the parts of an item that require rebuilding its Three.js model.
+ * Position-like fields are deliberately excluded: dragging, rotating, or
+ * nudging an item can then update the existing group in place.
+ */
+function furnitureVisualKey(
+  item: FurnitureItem,
+  floorIndex: number,
+  isActive: boolean,
+  exteriorOpening: ReturnType<typeof exteriorOpeningAttachment>,
+): string {
+  const {
+    position: _position,
+    rotation: _rotation,
+    elevation: _elevation,
+    mirrored: _mirrored,
+    locked: _locked,
+    collisionWidth: _collisionWidth,
+    collisionDepth: _collisionDepth,
+    ...visualFields
+  } = item;
+  return JSON.stringify({
+    visualFields,
+    floorIndex,
+    isActive,
+    exteriorOpening,
+  });
+}
+
 function isInsidePlan(layout: RoomLayout, x: number, z: number): boolean {
   const walls = layout.boundaryWalls;
   if (!walls?.length) return Math.abs(x) <= layout.width / 2 && Math.abs(z) <= layout.height / 2;
@@ -311,6 +344,17 @@ export function useSceneEffects({
   const activeFloorY = activeFloorIndex * FLOOR_HEIGHT_METERS;
   const digitalTwinLiveMode = digitalTwinDevices !== undefined;
   const catalog = useCatalogRegistry();
+  // A user-uploaded desk is stored in the browser's custom catalog, not in
+  // the repository. Prefer that asset for the built-in workstations when its
+  // catalog label identifies it as a desk/table.
+  const customDeskCatalogItem = useMemo(
+    () => catalog.find((entry) => {
+      if (!entry.customModelId) return false;
+      const label = `${entry.name} ${entry.type}`.toLocaleLowerCase('tr-TR');
+      return /masa|desk|workstation|çalışma/.test(label);
+    }),
+    [catalog]
+  );
   const visibleActiveFloor = useMemo<FloorLayout>(
     () => ({
       ...activeFloor,
@@ -360,6 +404,14 @@ export function useSceneEffects({
 
   const interiorWallsKey = useMemo(
     () => JSON.stringify(layout.floors.map((floor) => floor.interiorWalls ?? [])),
+    [layout.floors]
+  );
+
+  // Furniture is independent of interior-wall geometry. Keep this signature
+  // separate so editing a wall in the 2D plan does not destroy and recreate
+  // every chair, desk and GLB between pointer events.
+  const furnitureKey = useMemo(
+    () => JSON.stringify(layout.floors.map((floor) => floor.items)),
     [layout.floors]
   );
 
@@ -521,11 +573,29 @@ export function useSceneEffects({
     const scene = sceneRef.current;
     if (!THREE || !scene) return;
 
-    removeTagged(scene, ROOM_OBJECT_TAGS.Furniture);
-
     const floorsToRender = view.showAllFloors
       ? layout.floors.map((floor, index) => ({ floor, index }))
       : [{ floor: activeFloor, index: activeFloorIndex }];
+
+    const desiredItems = floorsToRender.flatMap(({ floor, index }) => {
+      const isActive = index === activeFloorIndex;
+      return floor.items
+        .filter((item) => isCatalogItemAvailable(item, catalog))
+        .flatMap((item) => {
+          // In RTLS live mode these placed people are represented by the
+          // tracked-avatar layer, not by static furniture groups.
+          if (!item.position || (digitalTwinLiveMode && isRtlsPersonItem(item))) return [];
+          return [{ item, index, isActive, floorY: index * FLOOR_HEIGHT_METERS }];
+        });
+    });
+    const desiredIds = new Set(desiredItems.map(({ item }) => item.id));
+
+    // Remove only furniture that disappeared from the desired set. Existing
+    // groups whose model key is unchanged stay alive and are updated below.
+    for (const child of [...scene.children]) {
+      if (child.userData.type !== ROOM_OBJECT_TAGS.Furniture) continue;
+      if (!desiredIds.has(child.userData.id as string)) removeAndDispose(scene, child);
+    }
 
     let disposed = false;
     const avatarMixers = new Set<ThreeNS.AnimationMixer>();
@@ -547,22 +617,65 @@ export function useSceneEffects({
       avatarAnimationRaf = requestAnimationFrame(updateAvatarAnimations);
     };
 
-    for (const { floor, index } of floorsToRender) {
-      const isActive = index === activeFloorIndex;
-      const floorY = index * FLOOR_HEIGHT_METERS;
-      const visibleItems = floor.items.filter((item) => isCatalogItemAvailable(item, catalog));
-
-      for (const item of visibleItems) {
+    for (const { item, index, isActive, floorY } of desiredItems) {
         if (!item.position) continue;
-        // In RTLS live mode the placed person items become moving tracked
-        // avatars. Do not also render their static editor copies underneath.
-        if (digitalTwinLiveMode && isRtlsPersonItem(item)) continue;
+        const floorItems = layout.floors[index]?.items ?? [];
+        const exteriorOpening = exteriorOpeningAttachment(item, layout);
 
         // Overlapping items keep their own materials; collision detection is
         // still calculated for editor logic but is no longer shown in red.
-        const modelItem = !view.lightsEnabled && isLightItemType(item.type)
-          ? { ...item, lightOn: false }
+        const deskModel = item.type === 'workstation' && customDeskCatalogItem
+          ? {
+              ...item,
+              type: 'custom-glb',
+              customModelId: customDeskCatalogItem.customModelId,
+              customModelUrl: customDeskCatalogItem.customModelUrl,
+              width: customDeskCatalogItem.width,
+              depth: customDeskCatalogItem.depth,
+              height: customDeskCatalogItem.height,
+            }
           : item;
+        const modelItem = !view.lightsEnabled && isLightItemType(deskModel.type)
+          ? { ...deskModel, lightOn: false }
+          : deskModel;
+
+        const visualKey = furnitureVisualKey(modelItem, index, isActive, exteriorOpening);
+        const existing = scene.children.find(
+          (child) => child.userData.type === ROOM_OBJECT_TAGS.Furniture && child.userData.id === item.id
+        );
+        const isAnimatedAvatar = item.type === 'office-avatar' || item.type === 'female-office-avatar';
+
+        // A drag/rotate/elevation edit only changes the transform. Keep the
+        // existing group, its loaded GLB and its materials in that case.
+        if (existing && existing.userData.furnitureVisualKey === visualKey && !isAnimatedAvatar) {
+          existing.position.set(item.position.x, floorY + (item.elevation ?? 0), item.position.z);
+          existing.rotation.y = item.rotation ?? 0;
+          existing.scale.x = item.mirrored ? -1 : 1;
+          existing.userData.floorY = floorY;
+          existing.userData.floorIndex = index;
+          existing.userData.locked = item.locked === true || !isActive;
+          existing.userData.ghostFloor = !isActive;
+          existing.userData.exteriorOpening = Boolean(exteriorOpening);
+          if (exteriorOpening) {
+            existing.userData.exteriorCenterX = exteriorOpening.centerX;
+            existing.userData.exteriorCenterZ = exteriorOpening.centerZ;
+            existing.userData.exteriorNormalX = exteriorOpening.normalX;
+            existing.userData.exteriorNormalZ = exteriorOpening.normalZ;
+            existing.userData.exteriorPlanCenterX = exteriorOpening.planCenterX;
+            existing.userData.exteriorPlanCenterZ = exteriorOpening.planCenterZ;
+          } else {
+            delete existing.userData.exteriorCenterX;
+            delete existing.userData.exteriorCenterZ;
+            delete existing.userData.exteriorNormalX;
+            delete existing.userData.exteriorNormalZ;
+            delete existing.userData.exteriorPlanCenterX;
+            delete existing.userData.exteriorPlanCenterZ;
+          }
+          continue;
+        }
+
+        if (existing) removeAndDispose(scene, existing);
+
         const group = createFurnitureModel(THREE, modelItem, false);
         // Some imported lamp models are visual-only GLBs and do not contain a
         // Three.js light. Add a local, real point light so clicking the model
@@ -583,7 +696,6 @@ export function useSceneEffects({
         group.userData.id = item.id;
         group.userData.floorIndex = index;
         group.userData.locked = item.locked === true || !isActive;
-        const exteriorOpening = exteriorOpeningAttachment(item, layout);
         if (exteriorOpening) {
           group.userData.exteriorOpening = true;
           group.userData.exteriorCenterX = exteriorOpening.centerX;
@@ -593,6 +705,7 @@ export function useSceneEffects({
           group.userData.exteriorPlanCenterX = exteriorOpening.planCenterX;
           group.userData.exteriorPlanCenterZ = exteriorOpening.planCenterZ;
         }
+        group.userData.furnitureVisualKey = visualKey;
         // Inactive-floor groups are excluded from pointer raycasts entirely
         // (see drag-handlers' furnitureList, #122).
         group.userData.ghostFloor = !isActive;
@@ -602,6 +715,7 @@ export function useSceneEffects({
         }
 
         scene.add(group);
+        if (isActive && rendererRef.current) queuePlanSprite(THREE, rendererRef.current, item, group);
         const camera = cameraRef.current;
         const distance = camera && item.position
           ? Math.hypot(item.position.x - camera.position.x, floorY - camera.position.y, item.position.z - camera.position.z)
@@ -611,12 +725,13 @@ export function useSceneEffects({
         if (item.customModelId) {
           const assetKey = item.customModelUrl ?? item.customModelId;
           void scheduleAssetLoad(`custom:${assetKey}`, visualPriority, () => loadStoredCustomGltfAsset(assetKey)).then((source) => {
-            if (!source || disposed || !group.parent) return;
+            if (!source || !group.parent || group.userData.furnitureVisualKey !== visualKey) return;
             for (const child of [...group.children]) {
               group.remove(child);
               disposeObject(child);
             }
             group.add(fitStoredCustomGltfAsset(THREE, source, modelItem));
+            if (isActive && rendererRef.current) queuePlanSprite(THREE, rendererRef.current, item, group, true);
             if (isActive) {
               const collision = measureCollisionFootprint(THREE, source, item);
               // Re-measure legacy GLB placements too: older saved layouts may
@@ -634,11 +749,15 @@ export function useSceneEffects({
             requestShadowUpdate();
           });
         } else if (item.type === 'office-avatar' || item.type === 'female-office-avatar') {
-          const loadIdleAvatar = item.type === 'female-office-avatar'
-            ? loadFemaleOfficeIdleAvatar
-            : loadOfficeIdleAvatar;
-          void loadIdleAvatar(THREE).then((source) => {
-            if (!source || disposed || !group.parent) return;
+          // A persisted working pose is only valid when the avatar is actually
+          // on a real seat. If the user drags it into open space, render a
+          // standing idle pose instead of showing a floating seated body.
+          const hasSeat = Boolean(item.position && findRtlsSeatAnchor(item.position, floorItems));
+          const loadAvatar = item.avatarPose === 'working' && hasSeat
+            ? (item.type === 'female-office-avatar' ? loadFemaleOfficeSittingAvatar : loadOfficeSittingAvatar)
+            : (item.type === 'female-office-avatar' ? loadFemaleOfficeIdleAvatar : loadOfficeIdleAvatar);
+          void loadAvatar(THREE).then((source) => {
+            if (!source || !group.parent || group.userData.furnitureVisualKey !== visualKey) return;
             for (const child of [...group.children]) {
               group.remove(child);
               disposeObject(child);
@@ -649,6 +768,10 @@ export function useSceneEffects({
               addBadge: false,
             });
             group.add(avatar.model);
+            // The initial sprite is queued before the asynchronous avatar GLB
+            // loads, so refresh it now that the real model is attached. This
+            // is what powers the isometric preview on 2D hover.
+            if (isActive && rendererRef.current) queuePlanSprite(THREE, rendererRef.current, item, group, true);
 
             const clip = avatar.animations.find((animation) => animation.name === 'mixamo.com')
               ?? avatar.animations[0];
@@ -680,12 +803,13 @@ export function useSceneEffects({
           const assetPath = GLTF_ASSET_PATHS[item.type];
           if (assetPath) {
             void loadGltfAsset(assetPath, visualPriority).then((source) => {
-              if (!source || disposed || !group.parent) return;
+              if (!source || !group.parent || group.userData.furnitureVisualKey !== visualKey) return;
               for (const child of [...group.children]) {
                 group.remove(child);
                 disposeObject(child);
               }
               group.add(fitGltfAsset(THREE, source, modelItem));
+            if (isActive && rendererRef.current) queuePlanSprite(THREE, rendererRef.current, item, group, true);
               if (isActive) {
                 const collision = measureCollisionFootprint(THREE, source, item);
                 if (
@@ -702,7 +826,6 @@ export function useSceneEffects({
             });
           }
         }
-      }
     }
 
     // The furniture set just changed — bump the revision so the drag/hover
@@ -726,8 +849,8 @@ export function useSceneEffects({
     };
   }, [
     isReady, invalidate, requestShadowUpdate, threeModuleRef, sceneRef,
-    layout.floors, layout.width, layout.height, layout.boundaryWalls,
-    activeFloor, activeFloorIndex, view.showAllFloors, view.lightsEnabled, view.wallDisplay, digitalTwinLiveMode, catalog, actions,
+    furnitureKey, layout.width, layout.height, boundaryWallsKey, wallOpeningsKey,
+    activeFloorIndex, view.showAllFloors, view.lightsEnabled, view.wallDisplay, digitalTwinLiveMode, catalog, actions, rendererRef,
   ]);
 
   // Selection / highlight outlines. Kept out of the furniture effect above so
@@ -786,7 +909,7 @@ export function useSceneEffects({
     // selected item is left with no outline after a Show-All-Floors toggle.
   }, [
     isReady, invalidate, threeModuleRef, sceneRef,
-    activeFloor, activeFloorIndex, layout.width, layout.height,
+    activeFloor.items, activeFloorIndex, layout.width, layout.height,
     selectedItemId, extraSelectedIds, highlightedIds, view.showAllFloors,
   ]);
 
@@ -856,6 +979,7 @@ export function useSceneEffects({
   useEffect(() => {
     invalidate();
     if (!isReady) return undefined;
+    if (view.view2D) return undefined;
     const THREE = threeModuleRef.current;
     const scene = sceneRef.current;
     if (!THREE || !scene) return undefined;
@@ -909,6 +1033,9 @@ export function useSceneEffects({
   useEffect(() => {
     invalidate();
     if (!isReady) return;
+    // The hidden 3D canvas does not need a fresh extrusion on every drag
+    // sample. This effect runs again as soon as the user returns to 3D.
+    if (view.view2D) return;
     const THREE = threeModuleRef.current;
     const scene = sceneRef.current;
     if (!THREE || !scene) return;
@@ -963,6 +1090,7 @@ export function useSceneEffects({
   useEffect(() => {
     invalidate();
     if (!isReady) return undefined;
+    if (view.view2D) return undefined;
     const THREE = threeModuleRef.current;
     const scene = sceneRef.current;
     if (!THREE || !scene) return undefined;
@@ -970,6 +1098,9 @@ export function useSceneEffects({
     for (const child of [...scene.children]) {
       if (child.userData.type === 'wall-selection') removeAndDispose(scene, child);
     }
+    // Live RTLS is a presentation view; do not carry a build-mode wall
+    // selection outline into the 3D scene.
+    if (digitalTwinLayers) return undefined;
     if (!selectedWall) return undefined;
 
     const tag = selectedWall.kind === 'interior' ? 'interior-wall' : 'wall';
@@ -1006,8 +1137,9 @@ export function useSceneEffects({
   }, [
     isReady, invalidate, threeModuleRef, sceneRef, rendererRef, cameraRef,
     selectedWall, activeFloorIndex,
+    digitalTwinLayers,
     shellFinishesKey, wallOpeningsKey, interiorWallsKey,
-    layout.width, layout.height, view.showAllFloors, view.wallDisplay,
+    layout.width, layout.height, view.showAllFloors, view.wallDisplay, view.view2D,
   ]);
 
   // Measurement markers
@@ -1146,7 +1278,7 @@ export function useSceneEffects({
       window.removeEventListener('catalog-thumbnails-ready', paint);
       removeRepaintHandler();
     };
-  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, selectedItemId, selectedWall, extraSelectedIds, placementFootprint, planZoom, planPanX, planPanY, wallDraft, pointerWorld, wallSnapResult]);
+  }, [invalidate, canvas2DRef, view.view2D, view.showMeasurements, view.showWiFiSignals, view.showHeatmap, view.drawWallMode, view.backgroundColor, view.backgroundImage, digitalTwinLayers, digitalTwinDevices, layout, visibleActiveFloor, visibleActiveFloor.floorColor, visibleActiveFloor.floorPattern, selectedItemId, selectedWall, extraSelectedIds, placementFootprint, planZoom, planPanX, planPanY, wallDraft, pointerWorld, wallSnapResult]);
 }
 
 export { measurementDistance } from '../three/measurement';

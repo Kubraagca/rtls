@@ -88,6 +88,11 @@ export interface WallPaintPanelProps {
   /** Optional pre-selected wall (from 3D click) — pre-targets the Apply-to chip. */
   selectedWall: { id: string; kind: 'exterior' | 'interior' } | null;
   onSelectedWallChange(wall: { id: string; kind: 'exterior' | 'interior' } | null): void;
+  /** Open directly on the requested surface when launched from a contextual tool. */
+  initialSurface?: Surface;
+  /** Hide wall controls when the panel is used as the 2D floor colour picker. */
+  floorOnly?: boolean;
+  onClose?(): void;
 }
 
 /**
@@ -116,7 +121,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
       actions.setWallColor(target, color);
     }
   };
-  const [surface, setSurface] = useState<Surface>('walls');
+  const [surface, setSurface] = useState<Surface>(props.initialSurface ?? 'walls');
   const [wallGroup, setWallGroup] = useState<string>('corporate');
   const [floorGroup, setFloorGroup] = useState<string>('corporate');
 
@@ -172,10 +177,22 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
           <Icon name="sparkle" size={12} />
           Paint
         </div>
-        <SurfaceTabs surface={surface} onChange={setSurface} />
+        {!props.floorOnly && <SurfaceTabs surface={surface} onChange={setSurface} />}
+        {props.onClose && (
+          <button
+            type="button"
+            aria-label="Boya panelini kapat"
+            title="Kapat"
+            onClick={props.onClose}
+            className="pc-tile"
+            style={{ width: 22, height: 22, padding: 0, borderRadius: 5, fontSize: 15, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        )}
       </div>
 
-      {surface === 'walls' ? (
+      {surface === 'walls' && !props.floorOnly ? (
         <>
           <SectionLabel>Duvar deseni</SectionLabel>
           <PatternGrid>
@@ -267,6 +284,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
             swatches={activeFloorPalette.colors}
             value={floor.floorColor}
             onChange={(color) => actions.setFloorColor(color)}
+            onCustomChange={(color) => actions.setFloorColor(color)}
           />
         </>
       )}

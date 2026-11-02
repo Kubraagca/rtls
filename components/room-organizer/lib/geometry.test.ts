@@ -196,6 +196,16 @@ describe('hasCollisions', () => {
     }
   });
 
+  it('keeps kitchen dining chairs outside the table footprint', () => {
+    const items = ROOM_TEMPLATES.kitchen.floors[0]!.items;
+    const table = items.find((item) => item.id === 'dining-1');
+    expect(table).toBeDefined();
+    for (const chair of items.filter((item) => item.type === 'dining-chair')) {
+      expect(itemsOverlap(table!, chair), chair.id).toBe(false);
+    }
+  });
+
+
   it('outdoor items are flagged when they poke into the room', () => {
     const tree = makeItem({ id: 't', type: 'tree', category: 'outdoor', width: 1, depth: 1, position: { x: 0, z: 0 } });
     expect(hasCollisions(tree, [tree], W, D)).toBe(true);

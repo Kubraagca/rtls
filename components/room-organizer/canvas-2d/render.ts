@@ -1,7 +1,9 @@
-import { GRID_SIZE_METERS } from '../lib/constants';
-import { rotatedHalfExtents } from '../lib/geometry';
 import { OFFICE_DIGITAL_TWIN_AREAS, OFFICE_DIGITAL_TWIN_PATHS } from '../lib/digital-twin-layers';
+import { rotatedHalfExtents } from '../lib/geometry';
+import { getPlanSprite, onPlanSpritesReady } from '../three/plan-sprites';
+import { getPlanFloorPattern } from '../three/floor-patterns';
 import { findFloorLoops } from '../three/room-floor-zones';
+import { isRtlsPersonItem } from '../lib/rtls-person-items';
 import type { FloorLayout, FurnitureItem, RoomLayout } from '../lib/types';
 
 export interface Render2DOptions {
@@ -38,6 +40,12 @@ export interface Render2DOptions {
 }
 
 const PADDING = 60;
+// The 2D planner uses a neutral architectural-paper floor so furniture and
+// annotations remain legible, independently of the rendered 3D material.
+const PLAN_FLOOR_COLOR = '#85817b';
+const PLAN_PAPER_COLOR = '#fbfcfd';
+const PLAN_WALL_COLOR = '#42474a';
+const PLAN_WALL_WIDTH_METERS = 0.18;
 // Matches the 0.16 m thickness modelled in three/interior-walls.ts.
 
 /** Convert a screen click on the full-size 2D plan into room coordinates. */
@@ -87,7 +95,8 @@ const repaintHandlers = new Set<() => void>();
 /** Register a repaint handler; returns the disposer that unregisters it. */
 export function addFloorPlanRepaintHandler(handler: () => void): () => void {
   repaintHandlers.add(handler);
-  return () => repaintHandlers.delete(handler);
+  const unsubscribe = onPlanSpritesReady(handler);
+  return () => { repaintHandlers.delete(handler); unsubscribe(); };
 }
 
 function requestRepaint(): void {
@@ -99,6 +108,38 @@ const CCTV_RING_FILLS = ['rgba(0, 136, 255, 0.12)', 'rgba(0, 221, 255, 0.08)', '
 const CCTV_RING_STROKES = ['rgba(0, 136, 255, 0.4)', 'rgba(0, 221, 255, 0.3)', 'rgba(136, 0, 255, 0.2)'];
 const RTLS_RING_FILLS = ['rgba(80, 227, 213, 0.12)', 'rgba(97, 201, 255, 0.08)', 'rgba(154, 140, 255, 0.06)'];
 const RTLS_RING_STROKES = ['rgba(80, 227, 213, 0.42)', 'rgba(97, 201, 255, 0.30)', 'rgba(154, 140, 255, 0.22)'];
+
+// Keep floor furniture readable when a chair is intentionally tucked slightly
+// under a desk/table. The surface must be painted after the chair so the chair
+// can never look like it is sitting on top of the tabletop in plan view.
+const PLAN_SEAT_TYPES = new Set([
+  'chair', 'dining-chair', 'office-chair', 'conference-chair', 'gltf-chair',
+  'armchair', 'bench', 'garden-bench',
+]);
+const PLAN_SURFACE_TYPES = new Set([
+  'table', 'dining-table', 'coffee-table', 'side-table', 'desk',
+  'workstation', 'meeting-table', 'reception-desk', 'counter', 'nightstand',
+]);
+const PLAN_TABLETOP_TYPES = new Set([
+  'computer', 'lamp', 'plant', 'books', 'candles', 'flowerpot', 'wifi',
+  'coffee-machine', 'vase', 'gltf-vase',
+]);
+
+function planFurnitureLayer(item: FurnitureItem): number {
+  if (item.type === 'rug' || item.height <= 0.05) return 0;
+  const isSeat = PLAN_SEAT_TYPES.has(item.type)
+    || item.type.includes('chair')
+    || item.name.toLocaleLowerCase().includes('sandalye');
+  if (isSeat) return 10;
+  const isSurface = PLAN_SURFACE_TYPES.has(item.type)
+    || item.type.includes('table')
+    || item.type.includes('desk')
+    || item.type.includes('workstation')
+    || item.name.toLocaleLowerCase().includes('masa');
+  if (isSurface) return 20;
+  if (PLAN_TABLETOP_TYPES.has(item.type) || (item.elevation ?? 0) > 0) return 30;
+  return 15;
+}
 
 export function render2DTopDown(options: Render2DOptions): void {
   const { canvas, layout, floor } = options;
@@ -116,7 +157,9 @@ export function render2DTopDown(options: Render2DOptions): void {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, viewWidth, viewHeight);
-  ctx.fillStyle = options.backgroundColor ?? '#ffffff';
+  // The 2D editor is presented as a drafting sheet; the 3D background colour
+  // should not tint this view.
+  ctx.fillStyle = PLAN_PAPER_COLOR;
   ctx.fillRect(0, 0, viewWidth, viewHeight);
   drawCanvasBackgroundImage(ctx, options.backgroundImage, viewWidth, viewHeight);
   drawBackgroundGrid(ctx, viewWidth, viewHeight);
@@ -132,9 +175,13 @@ export function render2DTopDown(options: Render2DOptions): void {
 
   drawFloor(ctx, layout, floor, offsetX, offsetY, scale);
   drawClosedFloorZones(ctx, layout, floor, offsetX, offsetY, scale);
-  drawGrid(ctx, layout, offsetX, offsetY, scale);
+  drawFloorPattern(ctx, layout, floor, offsetX, offsetY, scale);
+  // The blueprint grid stays on the paper outside the room. Do not draw a
+  // second grid over the floor itself; the reference uses a clean concrete
+  // surface there.
   drawRoomOutline(ctx, layout, floor, offsetX, offsetY, scale, options.selectedWallId);
   drawInteriorWalls(ctx, layout, floor, offsetX, offsetY, scale, options.selectedWallId);
+  drawPlanDoors(ctx, layout, floor, offsetX, offsetY, scale, options.selectedItemId);
   if (options.wallPreview) {
     drawWallPreview(ctx, layout, options.wallPreview, offsetX, offsetY, scale);
   }
@@ -206,6 +253,10 @@ function drawWallPreview(
   const y1 = offsetY + (preview.start.z + halfD) * scale;
   const x2 = offsetX + (preview.end.x + halfW) * scale;
   const y2 = offsetY + (preview.end.z + halfD) * scale;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const pixelLength = Math.hypot(dx, dy);
+  const worldLength = Math.hypot(preview.end.x - preview.start.x, preview.end.z - preview.start.z);
   ctx.save();
   // Canva/BAI-style alignment guides: the current endpoint projects a clear
   // horizontal and vertical reference across the plan before the wall exists.
@@ -219,34 +270,107 @@ function drawWallPreview(
   ctx.lineTo(ctx.canvas.width / (ctx.canvas.width / Math.max(1, ctx.canvas.clientWidth || ctx.canvas.width)), y2);
   ctx.stroke();
   ctx.setLineDash([10, 7]);
-  ctx.strokeStyle = '#1296c5';
-  ctx.lineWidth = 6;
+  ctx.strokeStyle = '#ef4444';
+  ctx.lineWidth = 7;
+  ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = '#198cff';
+  ctx.fillStyle = '#ef4444';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
   for (const [x, y] of [[x1, y1], [x2, y2]] as const) {
     ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+  }
+
+  // Planner-style live dimension: keep it just outside the wall so the
+  // measurement stays readable while the user is choosing the second point.
+  if (pixelLength > 18 && worldLength > 0.01) {
+    const normalX = -dy / pixelLength;
+    const normalY = dx / pixelLength;
+    const gap = 18;
+    const ax = x1 + normalX * gap;
+    const ay = y1 + normalY * gap;
+    const bx = x2 + normalX * gap;
+    const by = y2 + normalY * gap;
+    ctx.strokeStyle = 'rgba(42, 51, 57, .72)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    drawDimensionArrow(ctx, ax, ay, bx, by);
+    drawDimensionArrow(ctx, bx, by, ax, ay);
+
+    const label = `${worldLength.toFixed(2)} m`;
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    ctx.font = '700 11px Inter, Arial, sans-serif';
+    const textWidth = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(255, 255, 255, .96)';
+    roundRect(ctx, mx - textWidth / 2 - 7, my - 10, textWidth + 14, 20, 6);
+    ctx.fill();
+    ctx.fillStyle = '#30383e';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, mx, my);
   }
   ctx.restore();
 }
 
+function drawDimensionArrow(ctx: CanvasRenderingContext2D, x: number, y: number, targetX: number, targetY: number): void {
+  const angle = Math.atan2(targetY - y, targetX - x);
+  const size = 5;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + Math.cos(angle + Math.PI * .82) * size, y + Math.sin(angle + Math.PI * .82) * size);
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + Math.cos(angle - Math.PI * .82) * size, y + Math.sin(angle - Math.PI * .82) * size);
+  ctx.stroke();
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
 function drawBackgroundGrid(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-  const spacing = 16;
+  const minorSpacing = 16;
+  const majorSpacing = minorSpacing * 5;
   ctx.save();
-  ctx.strokeStyle = '#f0f2f4';
+  ctx.strokeStyle = '#e7ebee';
   ctx.lineWidth = 1;
-  for (let x = 0; x <= width; x += spacing) {
+  for (let x = 0; x <= width; x += minorSpacing) {
     ctx.beginPath();
     ctx.moveTo(x + 0.5, 0);
     ctx.lineTo(x + 0.5, height);
     ctx.stroke();
   }
-  for (let y = 0; y <= height; y += spacing) {
+  for (let y = 0; y <= height; y += minorSpacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(width, y + 0.5);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#cbd3d9';
+  for (let x = 0; x <= width; x += majorSpacing) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= height; y += majorSpacing) {
     ctx.beginPath();
     ctx.moveTo(0, y + 0.5);
     ctx.lineTo(width, y + 0.5);
@@ -254,8 +378,6 @@ function drawBackgroundGrid(ctx: CanvasRenderingContext2D, width: number, height
   }
   ctx.restore();
 }
-
-
 
 function drawTrackedDevices(
   ctx: CanvasRenderingContext2D,
@@ -382,7 +504,8 @@ function drawFloor(
   offsetY: number,
   scale: number
 ): void {
-  void floor;
+  const floorColor = floor.floorColor || PLAN_FLOOR_COLOR;
+
   const boundary = layout.boundaryWalls && layout.boundaryWalls.length >= 3 ? layout.boundaryWalls : null;
   const fillFloor = () => {
     if (!boundary) {
@@ -399,7 +522,7 @@ function drawFloor(
   if (url) {
     // Fill the floor colour first so there's a base while (or if) the image is
     // still decoding — avoids a flash of the raw canvas background.
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = floorColor;
     fillFloor();
 
     // naturalWidth guard: a broken image also reports `complete`, and
@@ -420,6 +543,16 @@ function drawFloor(
         ctx.drawImage(img, offsetX, offsetY, layout.width * scale, layout.height * scale);
         if (boundary) ctx.restore();
         ctx.globalAlpha = 1;
+
+        // Keep an uploaded plan image visible, but let the active floor colour
+        // tint it as well. Without this overlay the image completely hid
+        // floor-colour changes made from the 2D paint tool.
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = floorColor;
+        fillFloor();
+        ctx.restore();
       }
       return;
     }
@@ -437,40 +570,46 @@ function drawFloor(
       img.src = url;
     }
   } else {
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = floorColor;
     fillFloor();
   }
 }
 
-function drawGrid(
+/** Paint the selected floor pattern after enclosed zones so it stays visible. */
+function drawFloorPattern(
   ctx: CanvasRenderingContext2D,
   layout: RoomLayout,
+  floor: FloorLayout,
   offsetX: number,
   offsetY: number,
   scale: number
 ): void {
-  ctx.strokeStyle = '#edf0f2';
-  ctx.lineWidth = 1;
-  // Anchor the grid to the world centre (0,0) so the drawn cells line up with
-  // `snapToGrid`, which rounds world coordinates to multiples of
-  // GRID_SIZE_METERS about the origin. Corner-anchoring (0, 0.5, 1.0 …) drifts
-  // by `(width/2 mod GRID_SIZE_METERS)` and makes items look off-grid.
-  const halfW = layout.width / 2;
-  const halfD = layout.height / 2;
-  for (let wx = Math.ceil(-halfW / GRID_SIZE_METERS) * GRID_SIZE_METERS; wx <= halfW; wx += GRID_SIZE_METERS) {
-    const sx = offsetX + (wx + halfW) * scale;
+  const pattern = getPlanFloorPattern(
+    ctx,
+    floor.floorPattern ?? 'solid',
+    floor.floorColor || PLAN_FLOOR_COLOR,
+    scale
+  );
+  if (!pattern) return;
+
+  const boundary = layout.boundaryWalls && layout.boundaryWalls.length >= 3
+    ? layout.boundaryWalls
+    : null;
+  ctx.save();
+  ctx.globalAlpha = layout.floorPlanImage ? 0.5 : 1;
+  ctx.fillStyle = pattern;
+  if (!boundary) {
+    ctx.fillRect(offsetX, offsetY, layout.width * scale, layout.height * scale);
+  } else {
     ctx.beginPath();
-    ctx.moveTo(sx, offsetY);
-    ctx.lineTo(sx, offsetY + layout.height * scale);
-    ctx.stroke();
+    ctx.moveTo(offsetX + (boundary[0]!.x1 + layout.width / 2) * scale, offsetY + (boundary[0]!.z1 + layout.height / 2) * scale);
+    for (const wall of boundary) {
+      ctx.lineTo(offsetX + (wall.x2 + layout.width / 2) * scale, offsetY + (wall.z2 + layout.height / 2) * scale);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
-  for (let wz = Math.ceil(-halfD / GRID_SIZE_METERS) * GRID_SIZE_METERS; wz <= halfD; wz += GRID_SIZE_METERS) {
-    const sy = offsetY + (wz + halfD) * scale;
-    ctx.beginPath();
-    ctx.moveTo(offsetX, sy);
-    ctx.lineTo(offsetX + layout.width * scale, sy);
-    ctx.stroke();
-  }
+  ctx.restore();
 }
 
 function drawRoomOutline(
@@ -487,9 +626,10 @@ function drawRoomOutline(
     ctx.save();
     ctx.lineCap = 'square';
     for (const wall of layout.boundaryWalls) {
-      const hiddenWall = hidden.has(wall.id as 'north' | 'south' | 'east' | 'west');
-      ctx.strokeStyle = wall.id === selectedWallId ? '#19c6d1' : hiddenWall ? '#cbd1d5' : '#aeb3b6';
-      ctx.lineWidth = wall.id === selectedWallId ? 9 : hiddenWall ? 2 : 5;
+      const hiddenWall = hidden.has(wall.id.replace(/^outer-/, '') as 'north' | 'south' | 'east' | 'west');
+      ctx.strokeStyle = wall.id === selectedWallId ? '#19c6d1' : hiddenWall ? '#cbd1d5' : PLAN_WALL_COLOR;
+      ctx.lineWidth = Math.max(1, PLAN_WALL_WIDTH_METERS * scale) + (wall.id === selectedWallId ? 2 : 0);
+      ctx.setLineDash([]);
       if (hiddenWall) ctx.setLineDash([6, 4]);
       ctx.beginPath();
       ctx.moveTo(offsetX + (wall.x1 + layout.width / 2) * scale, offsetY + (wall.z1 + layout.height / 2) * scale);
@@ -521,9 +661,9 @@ function drawRoomOutline(
   for (const edge of edges) {
     const isHidden = hidden.has(edge.id);
     ctx.save();
-    const selected = edge.id === selectedWallId;
-    ctx.strokeStyle = selected ? '#19c6d1' : isHidden ? '#cbd1d5' : '#aeb3b6';
-    ctx.lineWidth = selected ? 9 : isHidden ? 2 : 5;
+    const selected = edge.id === selectedWallId || `outer-${edge.id}` === selectedWallId;
+    ctx.strokeStyle = selected ? '#19c6d1' : isHidden ? '#cbd1d5' : PLAN_WALL_COLOR;
+    ctx.lineWidth = Math.max(1, PLAN_WALL_WIDTH_METERS * scale) + (selected ? 2 : 0);
     if (isHidden) ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.moveTo(edge.from[0], edge.from[1]);
@@ -549,8 +689,8 @@ function drawInteriorWalls(
   ctx.save();
   ctx.lineCap = 'butt';
   for (const wall of walls) {
-    ctx.strokeStyle = wall.id === selectedWallId ? '#19c6d1' : '#9aa1a6';
-    ctx.lineWidth = wall.id === selectedWallId ? 9 : 5;
+    ctx.strokeStyle = wall.id === selectedWallId ? '#19c6d1' : PLAN_WALL_COLOR;
+    ctx.lineWidth = Math.max(1, PLAN_WALL_WIDTH_METERS * scale) + (wall.id === selectedWallId ? 2 : 0);
     const x1 = offsetX + (wall.x1 + halfW) * scale;
     const y1 = offsetY + (wall.z1 + halfD) * scale;
     const x2 = offsetX + (wall.x2 + halfW) * scale;
@@ -562,6 +702,82 @@ function drawInteriorWalls(
     drawWallLengthLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2, Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1));
   }
   ctx.restore();
+}
+
+/** Draw doors as architectural plan symbols instead of top-down furniture. */
+function drawPlanDoors(
+  ctx: CanvasRenderingContext2D,
+  layout: RoomLayout,
+  floor: FloorLayout,
+  offsetX: number,
+  offsetY: number,
+  scale: number,
+  selectedItemId: string | null,
+): void {
+  const floorColor = floor.floorColor || PLAN_FLOOR_COLOR;
+  const halfW = layout.width / 2;
+  const halfD = layout.height / 2;
+  for (const door of floor.items) {
+    if (door.type !== 'door' || !door.position) continue;
+    const rotation = door.rotation ?? 0;
+    const centerX = offsetX + (door.position.x + halfW) * scale;
+    const centerY = offsetY + (door.position.z + halfD) * scale;
+    const width = Math.max(0.1, door.width * scale);
+    // Leave a little clearance at both jambs so the dark wall stroke cannot
+    // visually close the opening at low zoom levels.
+    const openingWidth = width + Math.max(3, 0.05 * scale);
+    // Local X follows the wall. Local +Z is the opening's facing direction.
+    const tangentX = Math.cos(rotation);
+    const tangentY = -Math.sin(rotation);
+    const normalX = Math.sin(rotation);
+    const normalY = Math.cos(rotation);
+    const hingeX = centerX - tangentX * width / 2;
+    const hingeY = centerY - tangentY * width / 2;
+
+    ctx.save();
+    // Cut the wall line cleanly at the opening.
+    ctx.strokeStyle = floorColor;
+    ctx.lineWidth = PLAN_WALL_WIDTH_METERS * scale + Math.max(3, 0.05 * scale);
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(centerX - tangentX * openingWidth / 2, centerY - tangentY * openingWidth / 2);
+    ctx.lineTo(centerX + tangentX * openingWidth / 2, centerY + tangentY * openingWidth / 2);
+    ctx.stroke();
+
+    const selected = door.id === selectedItemId;
+    // The leaf is deliberately thicker than the wall's plan stroke so the
+    // open state is obvious even when the plan is zoomed out.
+    ctx.strokeStyle = selected ? '#0891b2' : (door.color || '#7a4b2c');
+    ctx.lineWidth = selected ? Math.max(3, 0.06 * scale) : Math.max(3, 0.05 * scale);
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(hingeX, hingeY);
+    ctx.lineTo(hingeX + normalX * width, hingeY + normalY * width);
+    ctx.stroke();
+
+    const closedAngle = Math.atan2(tangentY, tangentX);
+    // A light sector makes the swing area readable without hiding furniture;
+    // the solid arc is the conventional architectural open-door marker.
+    ctx.fillStyle = selected ? 'rgba(8, 145, 178, .10)' : 'rgba(122, 75, 44, .10)';
+    ctx.beginPath();
+    ctx.moveTo(hingeX, hingeY);
+    ctx.arc(hingeX, hingeY, width, closedAngle, closedAngle + Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = selected ? '#087f98' : '#4a403a';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(hingeX, hingeY, width, closedAngle, closedAngle + Math.PI / 2);
+    ctx.stroke();
+
+    ctx.fillStyle = selected ? '#087f98' : '#4a403a';
+    ctx.beginPath();
+    ctx.arc(hingeX, hingeY, Math.max(2, Math.min(3.5, scale * 0.035)), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 /** Paint every newly enclosed wall loop. The largest loop is the original
@@ -584,7 +800,7 @@ function drawClosedFloorZones(
   const largest = -1;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(198, 161, 110, 0.34)';
+  ctx.fillStyle = floor.floorColor || PLAN_FLOOR_COLOR;
   for (const [index, loop] of loops.entries()) {
     if (index === largest) continue;
     ctx.beginPath();
@@ -662,27 +878,54 @@ function drawFurniture(
   offsetY: number,
   scale: number
 ): void {
-  for (const item of options.floor.items) {
+  for (const item of [...options.floor.items].sort((a, b) => {
+    const layerOrder = planFurnitureLayer(a) - planFurnitureLayer(b);
+    return layerOrder || (a.elevation ?? 0) - (b.elevation ?? 0);
+  })) {
     if (!item.position) continue;
+    // Doors have a dedicated architectural symbol placed directly on walls.
+    if (item.type === 'door') continue;
     const cx = offsetX + (item.position.x + options.layout.width / 2) * scale;
     const cy = offsetY + (item.position.z + options.layout.height / 2) * scale;
-    const w = item.width * scale;
-    const d = item.depth * scale;
+    // The room and wall dimensions are world-space metres. Use the measured
+    // solid footprint when an imported model provides one; otherwise fall back
+    // to its catalog footprint so every item shares the wall's metre-to-pixel
+    // scale instead of using the model's untrimmed visual bounds.
+    const w = (item.collisionWidth ?? item.width) * scale;
+    const d = (item.collisionDepth ?? item.depth) * scale;
 
     ctx.save();
     ctx.translate(cx, cy);
     // Canvas rotate() is clockwise while Three's rotateY is CCW; negate so the
     // 2D footprint matches the 3D scene's orientation.
-    // Keep the floor plan orthogonal. Items may have fine-grained rotations
-    // in 3D, but diagonal symbols make a dense 2D plan hard to scan.
-    ctx.rotate(-snapPlanRotation(item.rotation ?? 0));
+    ctx.rotate(-(item.rotation ?? 0));
+    if (item.mirrored) ctx.scale(-1, 1);
+    const sprite = getPlanSprite(item);
+    ctx.shadowColor = 'rgba(28, 39, 48, 0.18)';
+    ctx.shadowBlur = Math.min(5, scale * 0.07);
+    ctx.shadowOffsetY = 1.5;
+    if (isRtlsPersonItem(item)) {
+      drawTopDownAvatar(ctx, item, w, d);
+    } else if (sprite) {
+      // The baked model bounds can be larger than the item's declared plan
+      // footprint (notably office/conference chairs). Always fit the sprite to
+      // the item's footprint so a chair cannot visually grow into a table.
+      ctx.drawImage(sprite.canvas, -w / 2, -d / 2, w, d);
+    } else {
+      ctx.fillStyle = item.color;
+      ctx.beginPath();
+      ctx.roundRect(-w / 2, -d / 2, w, d, Math.max(0, Math.min(4, w / 5, d / 5)));
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
 
     if (options.selectedItemId === item.id) {
-      ctx.strokeStyle = '#00ff00';
+      ctx.strokeStyle = '#0891b2';
       ctx.lineWidth = 3;
     } else if (options.extraSelectedIds?.has(item.id)) {
       // Multi-select extras share the primary's green, slightly thinner.
-      ctx.strokeStyle = '#00cc00';
+      ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 2;
     } else {
       ctx.strokeStyle = 'transparent';
@@ -692,14 +935,35 @@ function drawFurniture(
       ctx.strokeRect(-w / 2, -d / 2, w, d);
     }
 
-    ctx.font = `${Math.min(w, d) * 0.6}px Arial`;
-    ctx.fillStyle = item.color;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(planIcon(item), 0, 0);
     ctx.restore();
 
   }
+}
+
+/** Draw a compact, unmistakable person marker when the 3D avatar is viewed from above. */
+function drawTopDownAvatar(ctx: CanvasRenderingContext2D, item: FurnitureItem, width: number, depth: number): void {
+  const radius = Math.max(8, Math.min(width, depth) * 0.42);
+  const fill = item.color || '#2563eb';
+  ctx.shadowColor = 'rgba(28, 39, 48, 0.22)';
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = Math.max(1.5, radius * 0.12);
+  ctx.stroke();
+
+  // White head and shoulders silhouette, readable even at small plan scales.
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(0, -radius * 0.28, radius * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, radius * 0.25, radius * 0.43, Math.PI, 0);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawRoomDimensions(
@@ -718,34 +982,6 @@ function drawRoomDimensions(
   ctx.rotate(-Math.PI / 2);
   ctx.fillText(`${layout.height.toFixed(2)}m`, 0, 0);
   ctx.restore();
-}
-
-function planIcon(item: FurnitureItem): string {
-  const icon = item.icon?.trim();
-  // These legacy catalog glyphs render as unexplained boxes/lines in the
-  // plan. Keep authored emoji icons, but give geometric placeholders a
-  // recognizable type-based replacement.
-  if (icon && !/^[▤▥▧▦▰□◇◉🟫]+$/u.test(icon)) return icon;
-  const type = item.type.toLowerCase();
-  if (type.includes('chair') || type.includes('bench') || type.includes('seat')) return '🪑';
-  if (type.includes('table') || type.includes('desk') || type.includes('counter') || type.includes('workstation')) return '🪵';
-  if (type.includes('cabinet') || type.includes('locker') || type.includes('shelf') || type.includes('wardrobe') || type.includes('storage')) return '🗄️';
-  if (type.includes('lamp') || type.includes('light')) return '💡';
-  if (type.includes('plant') || type.includes('tree') || type.includes('bush') || type.includes('flower') || type.includes('vase')) return '🪴';
-  if (type.includes('screen') || type.includes('tv') || type.includes('monitor') || type.includes('computer')) return '🖥️';
-  if (type.includes('door')) return '🚪';
-  if (type.includes('window') || type.includes('partition') || type.includes('panel')) return '🪟';
-  if (type.includes('person') || type.includes('avatar') || type.includes('office-avatar')) return '🧍';
-  if (type.includes('trash') || type.includes('bin')) return '🗑️';
-  if (type.includes('printer')) return '🖨️';
-  if (type.includes('fridge')) return '🧊';
-  if (type.includes('coffee')) return '☕';
-  if (type.includes('water')) return '💧';
-  return icon || '•';
-}
-
-function snapPlanRotation(rotation: number): number {
-  return Math.round(rotation / (Math.PI / 2)) * (Math.PI / 2);
 }
 
 /**

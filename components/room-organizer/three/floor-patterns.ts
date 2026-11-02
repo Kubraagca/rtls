@@ -221,3 +221,26 @@ function shadeColor(hex: string, shade: number): string {
   const b = Math.min(255, Math.round(parseInt(normalized.slice(4, 6), 16) * shade));
   return `rgb(${r}, ${g}, ${b})`;
 }
+
+const planTiles = new Map<string, HTMLCanvasElement>();
+
+/** Same surface artwork and metre scale as the 3D floor, without loading WebGL. */
+export function getPlanFloorPattern(ctx: CanvasRenderingContext2D, pattern: FloorPattern, color: string, scale: number): CanvasPattern | null {
+  if (pattern === 'solid') return null;
+  const definition = PATTERNS[pattern];
+  if (!definition) return null;
+  const key = `${pattern}|${color}`;
+  let canvas = planTiles.get(key);
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 256;
+    const tileContext = canvas.getContext('2d');
+    if (!tileContext) return null;
+    definition.draw(tileContext, 256, color);
+    planTiles.set(key, canvas);
+    if (planTiles.size > 32) planTiles.delete(planTiles.keys().next().value!);
+  }
+  const fill = ctx.createPattern(canvas, 'repeat');
+  fill?.setTransform(new DOMMatrix().scale(scale / (256 * definition.repeatPerMeter)));
+  return fill;
+}

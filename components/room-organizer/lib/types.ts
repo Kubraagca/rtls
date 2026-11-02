@@ -123,6 +123,8 @@ export interface FurnitureItem {
   lightOn?: boolean;
   /** Whether a curtain is pulled open. Defaults to closed. */
   curtainsOpen?: boolean;
+  /** Optional office-avatar pose. Working avatars use the sitting/typing GLB. */
+  avatarPose?: 'idle' | 'working';
   rotation?: number;
   isWiFiAccessPoint?: boolean;
   isCCTV?: boolean;
