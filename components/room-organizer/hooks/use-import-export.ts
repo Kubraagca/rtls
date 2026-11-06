@@ -4,6 +4,7 @@ import {
   downloadSceneAsGlb,
   readLayoutFromFile,
 } from '../lib/file-io';
+import { saveLayout } from '../lib/persistence';
 import { encodeShareUrl, isShareUrlReasonablySized } from '../lib/share';
 import type { LayoutActions } from './use-layout-state';
 import type { RoomLayout } from '../lib/types';
@@ -90,6 +91,10 @@ export function useImportExport({
       try {
         const next = await readLayoutFromFile(file);
         actions.applyLayout(next);
+        // Persist imports immediately. Waiting for the autosave debounce made
+        // a quick refresh restore the previous layout, especially while the
+        // bundled default was still being loaded on a new browser.
+        saveLayout(next);
         onImported();
       } catch (importError) {
         const message =

@@ -106,21 +106,24 @@ export function useLayoutPersistence({
       !saved.floors.some((floor) => floor.items.some((item) => item.id === 'water-cooler-1' || item.id === 'locker-1'))
     );
     void isOlderOfficeDemoStarter;
-    const isExistingBuiltInOffice = Boolean(
-      saved?.floors.some((floor) =>
-        floor.name === 'Ana Ofis' && floor.items.some((item) => item.id === 'ws-1')
-      )
-    );
-    const shouldLoadBundledDefault = !saved || isExistingBuiltInOffice;
+    // A valid saved layout is user data, even when it resembles the bundled
+    // demo. Imported JSON can contain the same ids as the demo and must not
+    // be silently replaced by default-layout.json.
+    const shouldLoadBundledDefault = !saved;
     if (shouldLoadBundledDefault) {
       // The published default is kept as a static asset rather than in the
       // bundle, so the exact Barfas plan is shared by localhost and GitHub
       // Pages. Keep the old in-code starter as a safe offline fallback.
+      const defaultBaseline = layout;
       void loadBundledDefaultLayout().then((bundled) => {
         if (!bundled) {
           if (!saved) backupUnreadableLayout();
           return;
         }
+        // The default request is asynchronous. If the user imported a JSON
+        // layout while it was in flight, never let the late default response
+        // overwrite that import.
+        if (layoutRef.current !== defaultBaseline) return;
         hydrationBaseRef.current = layout;
         try {
           onHydrate(bundled);
