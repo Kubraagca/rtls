@@ -3,6 +3,7 @@
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { BUNDLED_CUSTOM_MODEL_PATHS } from '../lib/bundled-custom-assets';
 import { loadCustomGlbAssetData } from '../lib/custom-glb-store';
 import { normaliseCustomItemDimensions } from '../lib/custom-item-sizing';
 import type * as ThreeNS from 'three';
@@ -189,9 +190,13 @@ export function loadStoredCustomGltfAsset(id: string): Promise<ThreeNS.Object3D 
   // document-relative URL keeps them working on localhost and under the
   // GitHub Pages `/rtls/` base path, while opaque IDs still resolve from the
   // browser-local IndexedDB store used by user uploads.
-  const isBundledAssetPath = id.startsWith('/') || id.startsWith('./') || id.startsWith('../') || id.includes('/');
+  const bundledPath = BUNDLED_CUSTOM_MODEL_PATHS[id] ?? id;
+  const isBundledAssetPath = bundledPath.startsWith('/')
+    || bundledPath.startsWith('./')
+    || bundledPath.startsWith('../')
+    || bundledPath.includes('/');
   const assetUrl = isBundledAssetPath && typeof document !== 'undefined'
-    ? new URL(id, document.baseURI).toString()
+    ? new URL(bundledPath, document.baseURI).toString()
     : null;
   const promise = (assetUrl
     ? fetch(assetUrl).then((response) => response.ok ? response.arrayBuffer() : null)
