@@ -89,7 +89,7 @@ export function CatalogCreateDialog({ onClose, onItemAdded }: CatalogCreateDialo
     <div
       role="presentation"
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
-      style={{ position: 'fixed', inset: 0, zIndex: 120, display: 'grid', placeItems: 'center', padding: 18, background: 'rgba(5, 12, 18, .62)', backdropFilter: 'blur(5px)' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 120, display: 'grid', placeItems: 'center', padding: 18, background: 'rgba(5, 12, 18, .62)', backdropFilter: 'blur(5px)', pointerEvents: 'auto' }}
     >
       <div role="dialog" aria-modal="true" aria-label="Kataloga kategori veya eşya ekle" onMouseDown={(event) => event.stopPropagation()} style={{ width: 'min(470px, 100%)', maxHeight: 'calc(100vh - 36px)', overflowY: 'auto', borderRadius: 18, background: '#fff', color: '#24313b', boxShadow: '0 24px 80px rgba(0,0,0,.36)' }}>
         <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '16px 18px', borderBottom: '1px solid #e7ebee' }}>

@@ -1,4 +1,4 @@
-import { MAX_FLOORS, MAX_ROOM_DIMENSION } from '../lib/constants';
+import { DEFAULT_FLOOR_COLOR, MAX_FLOORS, MAX_ROOM_DIMENSION } from '../lib/constants';
 import { rotatedHalfExtents } from '../lib/geometry';
 import { isOpening, settleWallMountedItem } from '../lib/opening-snap';
 import type {
@@ -84,7 +84,7 @@ export interface LayoutState {
 export const INITIAL_GROUND_FLOOR: FloorLayout = {
   id: 'ground',
   name: 'Ana Ofis',
-  floorColor: '#686d73',
+  floorColor: DEFAULT_FLOOR_COLOR,
   floorPattern: 'concrete',
   wallPattern: 'plaster',
   wallColors: {
@@ -747,7 +747,7 @@ function normaliseLayout(layout: RoomLayout): RoomLayout {
       ? [INITIAL_GROUND_FLOOR]
       : layout.floors.slice(0, MAX_FLOORS).map((floor) => ({
           ...floor,
-          floorColor: floor.floorColor || '#686d73',
+          floorColor: floor.floorColor || DEFAULT_FLOOR_COLOR,
           items: floor.items.map((item) => ({
             ...item,
             color: item.color || '#cbd5e1',

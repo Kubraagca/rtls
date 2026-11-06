@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Paintbrush, Pencil, Plus } from 'lucide-react';
+import { Palette, Paintbrush, Pencil, Plus } from 'lucide-react';
 import { FloorPlanEditor } from './canvas-2d/floor-plan-editor';
 import { worldPositionFrom2DClient } from './canvas-2d/render';
 import { RoomEditorProvider, type RoomEditorContextValue } from './contexts/room-editor-context';
@@ -66,7 +66,7 @@ const INITIAL_VIEW_SETTINGS: ViewSettings = {
   // WebGL scene (and its optional GLB assets) is deferred until 3D Görünüm is
   // explicitly selected, so the UI is responsive immediately on modest PCs.
   view2D: true,
-  backgroundColor: '#dceefb',
+  backgroundColor: '#f0efef',
   backgroundImage: null,
   showMeasurements: true,
   showWiFiSignals: false,
@@ -142,8 +142,10 @@ export function RoomOrganizer(): JSX.Element {
   const [wallDraft, setWallDraft] = useState<{ x: number; z: number } | null>(null);
   const [wallChainStart, setWallChainStart] = useState<{ x: number; z: number } | null>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenuKind, setContextMenuKind] = useState<'surface' | 'background'>('surface');
   const [contextPlacement, setContextPlacement] = useState<{ x: number; z: number } | null>(null);
   const [paintDialogOpen, setPaintDialogOpen] = useState(false);
+  const [backgroundDialogOpen, setBackgroundDialogOpen] = useState(false);
   const [contextPaintSurface, setContextPaintSurface] = useState<'walls' | 'floor'>('floor');
   const [contextPaintWall, setContextPaintWall] = useState<{ id: string; kind: 'exterior' | 'interior' } | null>(null);
   const [pointerWorld, setPointerWorld] = useState<{ x: number; z: number } | null>(null);
@@ -574,8 +576,10 @@ export function RoomOrganizer(): JSX.Element {
   useEffect(() => {
     if (!view.view2D) {
       setContextMenuAnchor(null);
+      setContextMenuKind('surface');
       setContextPlacement(null);
       setPaintDialogOpen(false);
+      setBackgroundDialogOpen(false);
     }
   }, [view.view2D]);
 
@@ -589,8 +593,10 @@ export function RoomOrganizer(): JSX.Element {
       const target = event.target;
       if (target instanceof Element && target.closest('[data-context-action-surface]')) return;
       setContextMenuAnchor(null);
+      setContextMenuKind('surface');
       setContextPlacement(null);
       setPaintDialogOpen(false);
+      setBackgroundDialogOpen(false);
     };
     window.addEventListener('pointerdown', dismissContextMenu);
     return () => window.removeEventListener('pointerdown', dismissContextMenu);
@@ -976,13 +982,16 @@ export function RoomOrganizer(): JSX.Element {
         setSelectedWall({ id: wallId, kind });
       },
       onContextMenu: ({ clientX, clientY, surface, wallId, wallKind }) => {
-        const wall = surface === 'wall' && wallId && wallKind ? { id: wallId, kind: wallKind } : null;
+        const isBackground = surface === 'background';
+        const wall = !isBackground && surface === 'wall' && wallId && wallKind ? { id: wallId, kind: wallKind } : null;
         setSelectedWall(wall);
         setContextPaintWall(wall);
         setContextPaintSurface(surface === 'wall' ? 'walls' : 'floor');
+        setContextMenuKind(isBackground ? 'background' : 'surface');
         setContextMenuAnchor({ x: clientX, y: clientY });
         setPaintDialogOpen(false);
-        setContextPlacement(worldPositionFromClient(clientX, clientY));
+        setBackgroundDialogOpen(false);
+        setContextPlacement(isBackground ? null : worldPositionFromClient(clientX, clientY));
       },
       // Only track the floor pointer while wall-draw mode consumes it — the
       // handler writes React state per mousemove, re-rendering the whole tree,
@@ -1512,16 +1521,19 @@ export function RoomOrganizer(): JSX.Element {
               onPointerUp={handle2DWallMouseUp}
               onContextMenu={(clientX, clientY, surface) => {
                 const canvas = canvas2DRef.current;
+                const isBackground = !surface;
                 const wall = surface?.kind === 'wall'
                   ? { id: surface.id, kind: surface.wallKind }
                   : null;
                 setSelectedWall(wall);
                 setContextPaintWall(wall);
                 setContextPaintSurface(surface?.kind === 'wall' ? 'walls' : 'floor');
+                setContextMenuKind(isBackground ? 'background' : 'surface');
                 setContextMenuAnchor({ x: clientX, y: clientY });
                 setPaintDialogOpen(false);
+                setBackgroundDialogOpen(false);
                 setContextPlacement(canvas
-                  ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, planCamera)
+                  ? (isBackground ? null : worldPositionFrom2DClient(canvas, layout, clientX, clientY, planCamera))
                   : null);
               }}
               snapWallEndpoint={snap2DWallEndpoint}
@@ -1532,7 +1544,7 @@ export function RoomOrganizer(): JSX.Element {
 
       {contextMenuAnchor && (
         <>
-          {!paintDialogOpen && (
+          {contextMenuKind === 'surface' && !paintDialogOpen && !backgroundDialogOpen && (
             <>
             <CustomGlbUpload
               trigger={(open) => contextMenuAnchor ? (
@@ -1609,6 +1621,35 @@ export function RoomOrganizer(): JSX.Element {
             </button>
             </>
           )}
+          {contextMenuKind === 'background' && !backgroundDialogOpen && (
+            <button
+              type="button"
+              aria-label="Arka plan rengini degistir"
+              title="Arka plan rengini degistir"
+              className="pc-glass pc-glass--dark pc-tile"
+              onClick={() => setBackgroundDialogOpen(true)}
+              data-context-action-surface
+              style={{
+                position: 'fixed',
+                left: Math.min(Math.max(contextMenuAnchor.x, 22), window.innerWidth - 22),
+                top: Math.min(Math.max(contextMenuAnchor.y, 22), window.innerHeight - 22),
+                width: 44,
+                height: 44,
+                padding: 0,
+                borderRadius: '50%',
+                zIndex: 70,
+                display: 'grid',
+                placeItems: 'center',
+                background: 'linear-gradient(145deg, #ecfeff 0%, #cffafe 100%)',
+                border: '1px solid rgba(8, 145, 178, 0.30)',
+                color: '#0e7490',
+                boxShadow: '0 5px 14px rgba(8, 145, 178, 0.20)',
+                cursor: 'pointer',
+              }}
+            >
+              <Palette size={18} strokeWidth={2.1} />
+            </button>
+          )}
           {paintDialogOpen && (
             <div
               data-context-action-surface
@@ -1649,6 +1690,86 @@ export function RoomOrganizer(): JSX.Element {
                     setContextPlacement(null);
                   }}
                 />
+              </div>
+            </div>
+          )}
+          {backgroundDialogOpen && (
+            <div
+              data-context-action-surface
+              role="presentation"
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 80,
+                display: 'grid',
+                placeItems: 'center',
+                padding: 16,
+                background: 'rgba(255, 255, 255, 0.04)',
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                if (event.target === event.currentTarget) {
+                  setBackgroundDialogOpen(false);
+                  setContextMenuAnchor(null);
+                  setContextMenuKind('surface');
+                }
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Arka plan rengi"
+                className="pc-glass pc-glass--dark"
+                style={{ width: 'min(360px, calc(100vw - 32px))', padding: 20, color: '#f8fafc' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <div className="pc-hud-header" style={{ fontSize: 14 }}>Arka plan rengi</div>
+                    <div className="pc-blurb" style={{ marginTop: 4 }}>Bos sahnenin arka plan rengini sec.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBackgroundDialogOpen(false);
+                      setContextMenuAnchor(null);
+                      setContextMenuKind('surface');
+                    }}
+                    aria-label="Arka plan seciciyi kapat"
+                    style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(255,255,255,.16)', background: 'rgba(255,255,255,.08)', color: 'inherit', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+                  <input
+                    type="color"
+                    value={view.backgroundColor}
+                    onChange={(event) => setView((current) => ({ ...current, backgroundColor: event.target.value, backgroundImage: null }))}
+                    aria-label="Arka plan rengi sec"
+                    style={{ width: 58, height: 42, padding: 3, borderRadius: 8, border: '1px solid rgba(255,255,255,.20)', background: 'rgba(255,255,255,.08)', cursor: 'pointer' }}
+                  />
+                  <span style={{ fontFamily: 'monospace', fontSize: 13, textTransform: 'uppercase' }}>{view.backgroundColor}</span>
+                </label>
+                <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+                  <button
+                    type="button"
+                    onClick={() => setView((current) => ({ ...current, backgroundColor: '#f0efef', backgroundImage: null }))}
+                    style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,.16)', background: '#ffffff', color: '#17202a', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+                  >
+                    Varsayilana sifirla
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBackgroundDialogOpen(false);
+                      setContextMenuAnchor(null);
+                      setContextMenuKind('surface');
+                    }}
+                    style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,.16)', background: 'rgba(255,255,255,.08)', color: 'inherit', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+                  >
+                    Kapat
+                  </button>
+                </div>
               </div>
             </div>
           )}
