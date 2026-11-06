@@ -221,7 +221,11 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       // Cap the internal render resolution so high-DPI laptop screens do not
       // turn every live RTLS frame into a multi-million-pixel redraw.
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-      renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+      // Keep the canvas dimensions controlled by CSS. The default
+      // `updateStyle=true` writes the initial pixel size as an inline style,
+      // which leaves the WebGL surface stuck in its original small frame when
+      // a sidebar/layout transition makes the viewport larger.
+      renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       // The 2048² directional shadow is expensive; keep it static and only
@@ -390,15 +394,29 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         canvas.removeEventListener('webglcontextrestored', onContextRestored as EventListener);
       });
 
-      const onResize = () => {
-        camera.aspect = canvas.clientWidth / canvas.clientHeight;
+      const resizeRenderer = () => {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (width === 0 || height === 0) return;
+
+        camera.aspect = width / height;
         camera.updateProjectionMatrix();
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        // `false` is important here: CSS owns the displayed size, while
+        // Three.js only updates the drawing buffer and viewport.
+        renderer.setSize(width, height, false);
         invalidateRef.current();
       };
+      const onResize = () => resizeRenderer();
       window.addEventListener('resize', onResize);
-      cleanup.push(() => window.removeEventListener('resize', onResize));
+      const resizeObserver = typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(resizeRenderer)
+        : null;
+      resizeObserver?.observe(canvas);
+      cleanup.push(() => {
+        window.removeEventListener('resize', onResize);
+        resizeObserver?.disconnect();
+      });
 
       const removeDragHandlers = attachDragHandlers({
         THREE,
