@@ -901,21 +901,24 @@ function drawFurniture(
     ctx.rotate(-(item.rotation ?? 0));
     if (item.mirrored) ctx.scale(-1, 1);
     const sprite = getPlanSprite(item);
+    const isPerson = isRtlsPersonItem(item);
+    // Do not paint a loading rectangle or an approximate symbol. The plan is
+    // clearer when an item appears only after its actual sprite has finished
+    // baking. Items can therefore arrive one by one during the first load.
+    if (!isPerson && !sprite) {
+      ctx.restore();
+      continue;
+    }
     ctx.shadowColor = 'rgba(28, 39, 48, 0.18)';
     ctx.shadowBlur = Math.min(5, scale * 0.07);
     ctx.shadowOffsetY = 1.5;
-    if (isRtlsPersonItem(item)) {
+    if (isPerson) {
       drawTopDownAvatar(ctx, item, w, d);
     } else if (sprite) {
       // The baked model bounds can be larger than the item's declared plan
       // footprint (notably office/conference chairs). Always fit the sprite to
       // the item's footprint so a chair cannot visually grow into a table.
       ctx.drawImage(sprite.canvas, -w / 2, -d / 2, w, d);
-    } else {
-      ctx.fillStyle = item.color;
-      ctx.beginPath();
-      ctx.roundRect(-w / 2, -d / 2, w, d, Math.max(0, Math.min(4, w / 5, d / 5)));
-      ctx.fill();
     }
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;

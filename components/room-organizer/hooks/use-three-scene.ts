@@ -14,8 +14,10 @@ export type { HoverInfo, SelectionMode } from '../three/drag-handlers';
 
 export interface UseThreeSceneOptions extends SceneEventHandlers {
   canvasRef: React.RefObject<HTMLCanvasElement>;
-  /** Start the costly WebGL engine only when the 3D view is opened. */
+  /** Start the WebGL engine. It can stay idle while the 2D plan is visible. */
   enabled?: boolean;
+  /** Keep the main 3D frame loop off while the canvas is hidden in 2D mode. */
+  renderEnabled?: boolean;
   /** Maximum overview-camera distance derived from the active floor size. */
   maxZoomDistance?: number;
 }
@@ -44,6 +46,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   const {
     canvasRef,
     enabled = true,
+    renderEnabled = enabled,
     maxZoomDistance,
     walkthroughActive,
     onItemSelect,
@@ -70,8 +73,8 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   // Render-on-demand: do not keep an idle RAF loop alive. This also means an
   // already-created 3D scene costs no frames while the user is in the 2D plan.
   const dirtyRef = useRef(true);
-  const renderEnabledRef = useRef(enabled);
-  renderEnabledRef.current = enabled;
+  const renderEnabledRef = useRef(renderEnabled);
+  renderEnabledRef.current = renderEnabled;
   const scheduleRenderRef = useRef<() => void>(() => {});
   const invalidateRef = useRef(() => {
     dirtyRef.current = true;
@@ -99,8 +102,8 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   maxZoomDistanceRef.current = maxZoomDistance ?? THREE_VIEW_MAX_DISTANCE;
 
   useEffect(() => {
-    if (enabled) invalidateRef.current();
-  }, [enabled]);
+    if (enabled && renderEnabled) invalidateRef.current();
+  }, [enabled, renderEnabled]);
 
   // Latest-callback refs: capture handlers without making them part of the
   // init-effect dependency list (which would tear down the scene unnecessarily).
@@ -202,7 +205,12 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
 
       // Near plane pulled from 0.1 to 0.3 for better depth precision. The
       // walkthrough eye height is ~1.6m so 0.3 never clips near geometry.
-      const camera = new THREE.PerspectiveCamera(58, canvas.clientWidth / canvas.clientHeight, 0.05, 1000);
+      // The 3D canvas is display:none during the initial 2D view, so its
+      // client size is zero. A valid 1:1 bootstrap viewport lets WebGL load
+      // furniture and bake the 2D sprites before the user ever opens 3D.
+      const initialWidth = Math.max(1, canvas.clientWidth);
+      const initialHeight = Math.max(1, canvas.clientHeight);
+      const camera = new THREE.PerspectiveCamera(58, initialWidth / initialHeight, 0.05, 1000);
       // Office-first overview: comfortably frames the 18×12 m starter floor
       // without the strong wide-angle distortion of the previous house view.
       camera.position.set(11.5, 14.5, 14);
@@ -225,7 +233,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       // `updateStyle=true` writes the initial pixel size as an inline style,
       // which leaves the WebGL surface stuck in its original small frame when
       // a sidebar/layout transition makes the viewport larger.
-      renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+      renderer.setSize(initialWidth, initialHeight, false);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       // The 2048² directional shadow is expensive; keep it static and only

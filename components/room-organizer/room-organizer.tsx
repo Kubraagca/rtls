@@ -955,7 +955,11 @@ export function RoomOrganizer(): JSX.Element {
   const { isReady, error, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, worldPositionFromClient } =
     useThreeScene({
       canvasRef,
-      enabled: !view.view2D,
+      // Keep WebGL alive in the background so 2D can receive the real
+      // furniture sprites on first load instead of waiting for a 3D round-trip.
+      // The hidden 3D canvas itself does not render frames.
+      enabled: true,
+      renderEnabled: !view.view2D,
       maxZoomDistance,
       walkthroughActive,
       onItemSelect: handleSelect,
@@ -1552,10 +1556,10 @@ export function RoomOrganizer(): JSX.Element {
                     zIndex: 70,
                     display: 'grid',
                     placeItems: 'center',
-                    background: '#fff',
-                    border: '1px solid rgba(100, 110, 118, 0.12)',
-                    color: '#62686d',
-                    boxShadow: '0 5px 14px rgba(35, 45, 52, 0.22)',
+                    background: 'linear-gradient(145deg, #eff6ff 0%, #dbeafe 100%)',
+                    border: '1px solid rgba(37, 99, 235, 0.24)',
+                    color: '#2563eb',
+                    boxShadow: '0 5px 14px rgba(37, 99, 235, 0.24)',
                     cursor: 'pointer',
                   }}
                 >
@@ -1594,10 +1598,10 @@ export function RoomOrganizer(): JSX.Element {
                 zIndex: 70,
                 display: 'grid',
                 placeItems: 'center',
-                background: '#fff',
-                border: '1px solid rgba(100, 110, 118, 0.12)',
-                color: '#62686d',
-                boxShadow: '0 5px 14px rgba(35, 45, 52, 0.22)',
+                background: 'linear-gradient(145deg, #fff8e7 0%, #fef0c7 100%)',
+                border: '1px solid rgba(242, 181, 61, 0.34)',
+                color: '#b7791f',
+                boxShadow: '0 5px 14px rgba(180, 126, 30, 0.22)',
                 cursor: 'pointer',
               }}
             >
