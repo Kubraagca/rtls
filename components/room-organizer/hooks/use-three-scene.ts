@@ -200,7 +200,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       const scene = new THREE.Scene();
       // Day-sky horizon tone; replaced by the gradient texture as soon as
       // applyTimeOfDay runs (avoids a white flash on first paint).
-      scene.background = new THREE.Color(0xdceefb);
+      scene.background = new THREE.Color(0xf0efef);
       sceneRef.current = scene;
 
       // Near plane pulled from 0.1 to 0.3 for better depth precision. The

@@ -27,6 +27,33 @@ export const viewport = {
 //      one-shot either way.
 const CHUNK_RECOVERY_SCRIPT = `(function(){
   var K='pc-chunk-reload';
+  // Some browser security extensions add bis_* attributes while the HTML is
+  // being parsed. Remove those markers before React hydrates so they cannot
+  // turn into a false-positive hydration mismatch.
+  function stripBisAttrs(node){
+    if(!node||node.nodeType!==1) return;
+    node.removeAttribute('bis_register');
+    node.removeAttribute('bis_skin_checked');
+    if(node.querySelectorAll){
+      var descendants=node.querySelectorAll('[bis_register],[bis_skin_checked]');
+      for(var i=0;i<descendants.length;i++){
+        descendants[i].removeAttribute('bis_register');
+        descendants[i].removeAttribute('bis_skin_checked');
+      }
+    }
+  }
+  if(window.MutationObserver&&document.documentElement){
+    var bisObserver=new MutationObserver(function(records){
+      for(var i=0;i<records.length;i++){
+        var record=records[i];
+        if(record.type==='attributes') stripBisAttrs(record.target);
+        else for(var j=0;j<record.addedNodes.length;j++) stripBisAttrs(record.addedNodes[j]);
+      }
+    });
+    bisObserver.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['bis_register','bis_skin_checked']});
+    stripBisAttrs(document.documentElement);
+    setTimeout(function(){ bisObserver.disconnect(); },5000);
+  }
   function reloadOnce(){
     try{ if(sessionStorage.getItem(K)==='1') return; sessionStorage.setItem(K,'1'); }catch(e){}
     location.reload();

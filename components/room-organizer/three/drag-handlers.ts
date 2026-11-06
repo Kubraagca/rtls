@@ -36,7 +36,7 @@ export interface SceneEventHandlers {
   onItemHover?: (info: HoverInfo | null) => void;
   onEmptyClick?: (x: number, z: number) => void;
   onWallSelect?: (info: { wallId: string; kind: 'exterior' | 'interior' }) => void;
-  onContextMenu?: (info: { clientX: number; clientY: number; surface: 'wall' | 'floor'; wallId?: string; wallKind?: 'exterior' | 'interior' }) => void;
+  onContextMenu?: (info: { clientX: number; clientY: number; surface: 'wall' | 'floor' | 'background'; wallId?: string; wallKind?: 'exterior' | 'interior' }) => void;
   onFloorPointerMove?: (x: number, z: number) => void;
   onFloorPointerLeave?: () => void;
   snapPosition: (id: string, x: number, z: number) => { x: number; z: number };
@@ -384,6 +384,8 @@ export function attachDragHandlers({
     if (!callback) return;
     setPointerFromEvent(event);
     raycaster.setFromCamera(pointer, camera);
+    const furnitureObjects = scene.children.filter((obj) => obj.userData.type === 'furniture');
+    if (raycaster.intersectObjects(furnitureObjects, true).length > 0) return;
     const wallObjects = scene.children.filter(
       (obj) => obj.userData.type === 'wall' || obj.userData.type === 'interior-wall'
     );
@@ -402,7 +404,9 @@ export function attachDragHandlers({
     const floorObjects = scene.children.filter((obj) => obj.userData.type === 'floor');
     if (raycaster.intersectObjects(floorObjects, false).some((hit) => hit.object.visible)) {
       callback({ clientX: event.clientX, clientY: event.clientY, surface: 'floor' });
+      return;
     }
+    callback({ clientX: event.clientX, clientY: event.clientY, surface: 'background' });
   };
 
   canvas.addEventListener('pointerdown', onPointerDown);

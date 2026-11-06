@@ -636,7 +636,7 @@ describe('layoutReducer — applyLayout', () => {
     const state: LayoutState = { layout: makeLayout(), activeFloorIndex: 0 };
     const applied = layoutReducer(state, { type: 'applyLayout', layout: makeLayout({ floors }) });
     expect(applied.layout.floors).toHaveLength(MAX_FLOORS);
-    expect(applied.layout.floors[0]!.floorColor).toBe('#686d73');
+    expect(applied.layout.floors[0]!.floorColor).toBe('#d6d3ce');
   });
 
   it('replaces an empty floors array with a default ground floor', () => {

@@ -180,10 +180,10 @@ function computeSkyProfile(hour: number): SkyProfile {
   // deeper/more saturated than the horizon, which is what makes a sky read
   // as a sky instead of a flat backdrop.
   const horizonNight = 0x1a1f3a;
-  const horizonDay = 0xdceefb;
+  const horizonDay = 0xf0efef;
   const horizonDusk = 0xfdd9b0;
   const zenithNight = 0x0a0e22;
-  const zenithDay = 0x5d9fe2;
+  const zenithDay = 0xf0efef;
   const zenithDusk = 0x8478c0;
   let background = horizonNight;
   let backgroundTop = zenithNight;

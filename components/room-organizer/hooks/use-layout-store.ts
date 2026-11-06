@@ -22,6 +22,7 @@
 
 import { createStore, useStore } from 'zustand';
 import { randomId, randomSuffix } from '../lib/ids';
+import { DEFAULT_FLOOR_COLOR } from '../lib/constants';
 import {
   layoutReducer,
   INITIAL_GROUND_FLOOR,
@@ -114,7 +115,7 @@ export const layoutStore = createStore<LayoutStoreState>()((set) => {
       const id = nextId('floor');
       dispatch({
         type: 'addFloor',
-        floor: { id, items: [], floorColor: '#686d73', floorPattern: 'concrete' },
+        floor: { id, items: [], floorColor: DEFAULT_FLOOR_COLOR, floorPattern: 'concrete' },
       });
       return id;
     },

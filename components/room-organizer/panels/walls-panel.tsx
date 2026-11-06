@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useRoomEditor } from '../contexts';
+import { DEFAULT_FLOOR_COLOR } from '../lib/constants';
 import { FLOOR_PATTERN_LABELS } from '../three/floor-patterns';
 import { WALL_PATTERN_LABELS } from '../three/wall-patterns';
 import type { FloorPattern, WallId, WallPattern } from '../lib/types';
@@ -19,7 +20,6 @@ const FLOOR_PATTERNS: ReadonlyArray<FloorPattern> = ['solid', 'wood', 'tile', 'c
 const WALL_PATTERNS: ReadonlyArray<WallPattern> = ['solid', 'brick', 'panel', 'plaster'];
 
 const DEFAULT_WALL_COLOR = '#e3e4e6';
-const DEFAULT_FLOOR_COLOR = '#686d73';
 const CORPORATE_COLORS = [
   '#ffffff', '#f7f7f5', '#eeeae3', '#e5ded2',
   '#d6d3ce', '#b8bcc0', '#8b9298', '#5f6870',

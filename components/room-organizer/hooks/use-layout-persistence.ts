@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AUTOSAVE_DEBOUNCE_MS } from '../lib/constants';
+import { AUTOSAVE_DEBOUNCE_MS, DEFAULT_FLOOR_COLOR } from '../lib/constants';
 import { backupUnreadableLayout, loadLayout, saveLayout } from '../lib/persistence';
 import { decodeShareUrl, isShareHash } from '../lib/share';
 import type { RoomLayout } from '../lib/types';
@@ -103,7 +103,7 @@ export function useLayoutPersistence({
             ...saved,
             floors: saved.floors.map((floor) => ({
               ...floor,
-              floorColor: '#686d73',
+              floorColor: DEFAULT_FLOOR_COLOR,
               floorPattern: 'concrete' as const,
               items: [
                 ...floor.items,

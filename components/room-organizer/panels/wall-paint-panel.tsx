@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRoomEditor } from '../contexts';
+import { DEFAULT_FLOOR_COLOR } from '../lib/constants';
 import { Icon } from '../plotcraft/icon';
 import type {
   FloorPattern,
@@ -67,8 +68,6 @@ const FLOOR_PALETTES: readonly SwatchGroup[] = [
     ],
   },
 ];
-
-const DEFAULT_FLOOR_COLOR = '#686d73';
 
 // ============================================================================
 // Apply-to + active-tab state

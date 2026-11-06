@@ -196,19 +196,6 @@
   min-width: 200px;
 }
 
-/* The paint dialog is deliberately compact on phones, but the same fixed
-   280px panel feels undersized when it is centred in a desktop viewport. */
-@media (min-width: 769px) {
-  .pc-wall-paint {
-    width: min(370px, calc(100vw - 32px)) !important;
-    box-sizing: border-box;
-    padding: 16px 18px !important;
-    min-height: min(420px, calc(100vh - 32px));
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-  }
-}
-
 /* Clean architectural presentation for the editable 2D plan. The SVG remains
    responsible for hit-testing; these rules only give it the calm, white-board
    chrome of a professional floor-plan tool. */

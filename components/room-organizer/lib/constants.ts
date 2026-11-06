@@ -5,6 +5,7 @@ export const STORAGE_KEY = 'standalone-room-organizer-layout-v3';
 export const AUTOSAVE_DEBOUNCE_MS = 1500;
 export const GRID_SIZE_METERS = 0.5;
 export const DEFAULT_BUDGET = 25_000;
+export const DEFAULT_FLOOR_COLOR = '#d6d3ce';
 
 export const CURRENCY_SYMBOL = '$';
 
