@@ -11,7 +11,7 @@ This repository provides a polished, grid-based architecture and interior design
 
 Built with Next.js 15, React 18, Three.js, and Tailwind CSS. No backend, no authentication — everything runs client-side.
 
-**[Live Demo](https://kubraagca/rtls)** 
+**[Live Demo](https://kubraagca/rtls](https://kubraagca.github.io/rtls/)** 
 ## Run it
 
 ```bash
