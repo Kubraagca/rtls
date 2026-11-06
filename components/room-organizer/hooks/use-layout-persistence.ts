@@ -1,8 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { AUTOSAVE_DEBOUNCE_MS, DEFAULT_FLOOR_COLOR } from '../lib/constants';
 import { backupUnreadableLayout, loadLayout, saveLayout } from '../lib/persistence';
+import { parseStoredLayout } from '../lib/schema';
 import { decodeShareUrl, isShareHash } from '../lib/share';
 import type { RoomLayout } from '../lib/types';
+
+const BUNDLED_DEFAULT_LAYOUT = 'default-layout.json';
+
+async function loadBundledDefaultLayout(): Promise<RoomLayout | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    // Resolve relative to the current document so the asset works on both
+    // localhost and the GitHub Pages `/rtls/` base path.
+    const response = await fetch(new URL(BUNDLED_DEFAULT_LAYOUT, document.baseURI).toString(), {
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+    return parseStoredLayout(await response.json());
+  } catch (error) {
+    console.warn('Failed to load bundled default layout:', error);
+    return null;
+  }
+}
 
 export interface UseLayoutPersistenceOptions {
   layout: RoomLayout;
@@ -87,6 +106,31 @@ export function useLayoutPersistence({
       !saved.floors.some((floor) => floor.items.some((item) => item.id === 'water-cooler-1' || item.id === 'locker-1'))
     );
     void isOlderOfficeDemoStarter;
+    const isExistingBuiltInOffice = Boolean(
+      saved?.floors.some((floor) =>
+        floor.name === 'Ana Ofis' && floor.items.some((item) => item.id === 'ws-1')
+      )
+    );
+    const shouldLoadBundledDefault = !saved || isExistingBuiltInOffice;
+    if (shouldLoadBundledDefault) {
+      // The published default is kept as a static asset rather than in the
+      // bundle, so the exact Barfas plan is shared by localhost and GitHub
+      // Pages. Keep the old in-code starter as a safe offline fallback.
+      void loadBundledDefaultLayout().then((bundled) => {
+        if (!bundled) {
+          if (!saved) backupUnreadableLayout();
+          return;
+        }
+        hydrationBaseRef.current = layout;
+        try {
+          onHydrate(bundled);
+        } catch (error) {
+          console.warn('Failed to apply bundled default layout:', error);
+          hydrationBaseRef.current = null;
+        }
+      });
+      return;
+    }
     // A schema-valid saved layout is user data, including edited demo layouts
     // with additional floors. Never discard it based on its display name.
     if (saved) {
