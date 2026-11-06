@@ -14,6 +14,8 @@ export type { HoverInfo, SelectionMode } from '../three/drag-handlers';
 
 export interface UseThreeSceneOptions extends SceneEventHandlers {
   canvasRef: React.RefObject<HTMLCanvasElement>;
+  /** Start the costly WebGL engine only when the 3D view is opened. */
+  enabled?: boolean;
   /** Maximum overview-camera distance derived from the active floor size. */
   maxZoomDistance?: number;
 }
@@ -41,6 +43,7 @@ export interface UseThreeSceneResult {
 export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResult {
   const {
     canvasRef,
+    enabled = true,
     maxZoomDistance,
     walkthroughActive,
     onItemSelect,
@@ -54,6 +57,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
     onItemHover,
     onEmptyClick,
     onWallSelect,
+    onContextMenu,
     onFloorPointerMove,
     onFloorPointerLeave,
     snapPosition,
@@ -63,11 +67,15 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Render-on-demand: the RAF loop only renders when OrbitControls report
-  // movement or something marked the scene dirty. Starts dirty for frame 1.
+  // Render-on-demand: do not keep an idle RAF loop alive. This also means an
+  // already-created 3D scene costs no frames while the user is in the 2D plan.
   const dirtyRef = useRef(true);
+  const renderEnabledRef = useRef(enabled);
+  renderEnabledRef.current = enabled;
+  const scheduleRenderRef = useRef<() => void>(() => {});
   const invalidateRef = useRef(() => {
     dirtyRef.current = true;
+    scheduleRenderRef.current();
   });
 
   // Shadow map is static by default (autoUpdate = false); we recompute it only
@@ -78,6 +86,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
     const renderer = rendererRef.current;
     if (renderer) renderer.shadowMap.needsUpdate = true;
     dirtyRef.current = true;
+    scheduleRenderRef.current();
   });
 
   const threeModuleRef = useRef<ThreeModule | null>(null);
@@ -88,6 +97,10 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   const controlsRef = useRef<OrbitControlsType | null>(null);
   const maxZoomDistanceRef = useRef(maxZoomDistance ?? THREE_VIEW_MAX_DISTANCE);
   maxZoomDistanceRef.current = maxZoomDistance ?? THREE_VIEW_MAX_DISTANCE;
+
+  useEffect(() => {
+    if (enabled) invalidateRef.current();
+  }, [enabled]);
 
   // Latest-callback refs: capture handlers without making them part of the
   // init-effect dependency list (which would tear down the scene unnecessarily).
@@ -104,6 +117,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
     onItemHover,
     onEmptyClick,
     onWallSelect,
+    onContextMenu,
     onFloorPointerMove,
     onFloorPointerLeave,
     snapPosition,
@@ -122,6 +136,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
     onItemHover,
     onEmptyClick,
     onWallSelect,
+    onContextMenu,
     onFloorPointerMove,
     onFloorPointerLeave,
     snapPosition,
@@ -131,6 +146,9 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
   // Load Three.js + OrbitControls once.
   const [isModuleLoaded, setModuleLoaded] = useState(false);
   useEffect(() => {
+    // Keep Three.js, its dependencies, and all model work out of the 2D
+    // editor's critical path. The loaded module remains cached afterwards.
+    if (!enabled) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -156,7 +174,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   // Initialize scene once the module + canvas are ready.
   useEffect(() => {
@@ -309,10 +327,18 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
       // into it throws and/or wastes work. Pause the render half of the loop
       // until `webglcontextrestored` fires.
       let contextLost = false;
-
       let rafId = 0;
-      const tick = () => {
+      let frameScheduled = false;
+      const scheduleFrame = () => {
+        if (frameScheduled || contextLost) return;
+        frameScheduled = true;
         rafId = requestAnimationFrame(tick);
+      };
+      const tick = () => {
+        frameScheduled = false;
+        // Retain the initialized scene when switching back to 2D, but do not
+        // render the hidden canvas.
+        if (!renderEnabledRef.current || contextLost) return;
         // Keep the comfortable overview angle while the camera is far away.
         // As the user zooms into a floor, gradually unlock a steeper orbit so
         // the ceiling can be inspected without changing the wide overview.
@@ -329,13 +355,19 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         // into the polar cone before every render (#114). Walkthrough marks
         // frames dirty itself, so skipping update() here loses nothing.
         const controlsMoved = handlersRef.current.walkthroughActive ? false : controls.update();
-        if (contextLost) return;
         if (!controlsMoved && !dirtyRef.current) return;
         dirtyRef.current = false;
         renderer.render(scene, camera);
+        // Orbit damping needs consecutive frames. A static scene does not.
+        if (controlsMoved) scheduleFrame();
       };
-      rafId = requestAnimationFrame(tick);
-      cleanup.push(() => cancelAnimationFrame(rafId));
+      scheduleRenderRef.current = scheduleFrame;
+      scheduleFrame();
+      cleanup.push(() => {
+        cancelAnimationFrame(rafId);
+        frameScheduled = false;
+        if (scheduleRenderRef.current === scheduleFrame) scheduleRenderRef.current = () => {};
+      });
 
       // WebGL context loss (GPU reset, driver hiccup, tab backgrounding) would
       // otherwise blank the canvas forever. preventDefault() lets the browser
@@ -363,7 +395,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         camera.updateProjectionMatrix();
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
         renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-        dirtyRef.current = true;
+        invalidateRef.current();
       };
       window.addEventListener('resize', onResize);
       cleanup.push(() => window.removeEventListener('resize', onResize));
@@ -374,7 +406,7 @@ export function useThreeScene(options: UseThreeSceneOptions): UseThreeSceneResul
         camera,
         scene,
         markDirty: () => {
-          dirtyRef.current = true;
+          invalidateRef.current();
         },
         requestShadowUpdate: requestShadowUpdateRef.current,
         controls,

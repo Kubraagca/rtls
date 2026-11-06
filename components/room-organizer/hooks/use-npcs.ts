@@ -13,7 +13,7 @@ import {
   type OfficeAvatarAsset
 } from '../three/office-avatar';
 import { createRtlsScannedCrowdRenderer, type CrowdProxyAgent, type RtlsScannedCrowdRenderer } from '../three/rtls-scanned-crowd-renderer';
-import type { FurnitureItem } from '../lib/types';
+import type { FurnitureItem, InteriorWall } from '../lib/types';
 import type * as ThreeNS from 'three';
 
 type ThreeModule = typeof import('three');
@@ -38,8 +38,14 @@ const AVATAR_REPATH_DELAY_SECONDS = 0.02;
 // use any open gap between objects; only entering an object's actual bounds is
 // blocked. A tiny epsilon avoids numerical tunnelling through exact corners.
 const AVATAR_COLLISION_RADIUS = 0.035;
+const AVATAR_WALL_THICKNESS = 0.16;
+const AVATAR_WALL_OPENING_TOLERANCE = 0.4;
 const AVATAR_AVOIDANCE_RADIUS = 0.18;
 const AVATAR_STUCK_IDLE_DELAY_SECONDS = 3;
+const AVATAR_SEAT_DWELL_MIN_SECONDS = 1.2;
+const AVATAR_SEAT_DWELL_MAX_SECONDS = 2.0;
+const AVATAR_SEAT_STABILITY_TOLERANCE = 0.06;
+const AVATAR_STUCK_SEAT_SEARCH_RADIUS = 0.9;
 
 interface RtlsStation {
   id: string;
@@ -87,7 +93,14 @@ interface NpcState {
   cameraDistance: number;
   avatarVariant: AvatarVariant;
   blockedFor: number;
+  stuckFor: number;
   navigationPath: Array<{ x: number; z: number }>;
+  seatDwell?: {
+    seatId: string;
+    x: number;
+    z: number;
+    until: number;
+  };
 }
 
 interface AvatarObstacle {
@@ -131,6 +144,9 @@ export interface UseNpcsOptions {
   roomDepth: number;
   /** Office items are used to derive realistic work/desk stations. */
   items?: readonly FurnitureItem[];
+  /** Persisted exterior and interior wall segments used by the RTLS collider. */
+  boundaryWalls?: readonly InteriorWall[];
+  interiorWalls?: readonly InteriorWall[];
   /** Y-offset to plant the avatars on the active floor. */
   floorY: number;
   /** Request a render on the next animation frame (render-on-demand). */
@@ -170,6 +186,8 @@ export function useNpcs(options: UseNpcsOptions): void {
     roomWidth,
     roomDepth,
     items = [],
+    boundaryWalls = [],
+    interiorWalls = [],
     floorY,
     invalidate,
     requestShadowUpdate,
@@ -234,7 +252,7 @@ export function useNpcs(options: UseNpcsOptions): void {
 
     const personItems = getRtlsPersonItems(items);
     const stations = buildRtlsStations(items, halfW, halfD);
-    const obstacles = buildAvatarObstacles(items);
+    const obstacles = buildAvatarObstacles(items, [...boundaryWalls, ...interiorWalls]);
     const reservedSeatIds = new Set<string>();
     const npcs: NpcState[] = personItems.map((item, index) => {
       const npc = createNpc(THREE, halfW, halfD, floorY, index, stations, item, reservedSeatIds);
@@ -415,7 +433,7 @@ export function useNpcs(options: UseNpcsOptions): void {
       requestShadowUpdate?.();
       invalidate?.();
     };
-  }, [enabled, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, cameraRef, rendererRef, roomWidth, roomDepth, items, floorY]);
+  }, [enabled, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, cameraRef, rendererRef, roomWidth, roomDepth, items, boundaryWalls, interiorWalls, floorY]);
 }
 
 function buildRtlsStations(items: readonly FurnitureItem[], halfW: number, halfD: number): RtlsStation[] {
@@ -478,6 +496,7 @@ function createNpc(
     cameraDistance: Number.POSITIVE_INFINITY,
     avatarVariant: sourceItem.type === 'female-office-avatar' ? 'female' : 'male',
     blockedFor: 0,
+    stuckFor: 0,
     navigationPath: [],
   };
 }
@@ -535,9 +554,12 @@ function stepSimulation(
           station.x - npc.position.x,
           station.z - npc.position.z
         ) <= 0.18) {
-          setMode(npc, 'working', now);
-          npc.modeUntil = now + 5200 + (npc.index % 8) * 420;
+          // Reaching a seat is only the start of the seating decision. Keep
+          // the avatar standing for a moment and require it to remain at the
+          // same spot before switching to the sitting/working pose.
+          startSeatDwell(npc, station, now);
         } else {
+          npc.seatDwell = undefined;
           setMode(npc, 'idle', now);
           npc.modeUntil = now + 1200 + (npc.index % 7) * 180;
         }
@@ -569,47 +591,6 @@ function stepSimulation(
         if (movedX) npc.position.x = nextX;
         if (movedZ) npc.position.z = nextZ;
       }
-      const actualMove = Math.hypot(npc.position.x - previousX, npc.position.z - previousZ);
-      if (actualMove < 0.0001) {
-        npc.blockedFor += delta;
-        if (npc.blockedFor >= AVATAR_STUCK_IDLE_DELAY_SECONDS) {
-          // Do not loop a walking animation forever against an unreachable
-          // obstacle. Briefly rest, then the idle branch selects a fresh
-          // target and returns the avatar to walking mode.
-          setMode(npc, 'idle', now);
-          npc.modeUntil = now + 900;
-          npc.navigationPath = [];
-          npc.blockedFor = 0;
-          npc.group.position.set(npc.position.x, floorY, npc.position.z);
-          changed = true;
-          continue;
-        }
-        if (npc.blockedFor > AVATAR_REPATH_DELAY_SECONDS) {
-          const route = buildAvatarRoute(
-            { x: npc.position.x, z: npc.position.z },
-            npc.target,
-            obstacles,
-            halfW,
-            halfD,
-            npc.targetKind === 'seat',
-            npc.targetSeatId
-          );
-          if (route.length > 1) {
-            npc.navigationPath = route.slice(1);
-            npc.target = npc.navigationPath.shift()!;
-          } else {
-            npc.targetSeatId = undefined;
-            const next = pickTarget(npc.index + 1, stations, halfW, halfD, false, occupiedSeatIds(npcs));
-            npc.target = { x: next.x, z: next.z };
-            npc.targetKind = next.kind;
-            npc.targetSeatId = next.seatId;
-            npc.targetFaceYaw = next.faceYaw;
-          }
-          npc.blockedFor = 0;
-        }
-      } else {
-        npc.blockedFor = 0;
-      }
       const movedDx = npc.position.x - previousX;
       const movedDz = npc.position.z - previousZ;
       const remainingDistance = Math.hypot(
@@ -617,18 +598,53 @@ function stepSimulation(
         npc.target.z - npc.position.z
       );
       const madeTargetProgress = distance - remainingDistance > 0.001;
-      if (!madeTargetProgress && actualMove > 0.0001) {
+
+      // Side-stepping around an obstacle can produce visible movement without
+      // getting any closer to the target. Count that as stuck too; otherwise
+      // an avatar can walk in place forever while its route is rebuilt.
+      if (madeTargetProgress) {
+        npc.stuckFor = 0;
+        npc.blockedFor = 0;
+      } else {
+        npc.stuckFor += delta;
         npc.blockedFor += delta;
-        if (npc.blockedFor >= AVATAR_STUCK_IDLE_DELAY_SECONDS) {
-          setMode(npc, 'idle', now);
-          npc.modeUntil = now + 900;
-          npc.navigationPath = [];
-          npc.blockedFor = 0;
+      }
+
+      if (npc.stuckFor >= AVATAR_STUCK_IDLE_DELAY_SECONDS) {
+        // If the avatar is stuck beside a free chair, use it as a recovery
+        // seat instead of making the avatar walk away from an obvious place
+        // to sit. The small snap puts the sitting pose on the actual anchor.
+        const nearbySeat = findNearbyAvailableSeat(npc, stations, npcs);
+        if (nearbySeat) startSeatDwell(npc, nearbySeat, now, true);
+        else sendNpcToRoam(npc, halfW, halfD, now);
+        npc.group.position.set(npc.position.x, floorY, npc.position.z);
+        changed = true;
+        continue;
+      }
+
+      if (npc.blockedFor > AVATAR_REPATH_DELAY_SECONDS) {
+        const route = buildAvatarRoute(
+          { x: npc.position.x, z: npc.position.z },
+          npc.target,
+          obstacles,
+          halfW,
+          halfD,
+          npc.targetKind === 'seat',
+          npc.targetSeatId
+        );
+        if (route.length > 1) {
+          npc.navigationPath = route.slice(1);
+          npc.target = npc.navigationPath.shift()!;
+        } else {
+          const nearbySeat = findNearbyAvailableSeat(npc, stations, npcs);
+          if (nearbySeat) startSeatDwell(npc, nearbySeat, now, true);
+          else sendNpcToRoam(npc, halfW, halfD, now);
           npc.group.position.set(npc.position.x, floorY, npc.position.z);
           changed = true;
           continue;
         }
-      } else if (actualMove > 0.0001) {
+        // Keep stuckFor cumulative across route retries, but allow another
+        // route calculation only after the avatar has had time to move.
         npc.blockedFor = 0;
       }
       if (Math.hypot(movedDx, movedDz) > 0.0001) {
@@ -643,6 +659,36 @@ function stepSimulation(
 
     npc.group.position.set(npc.position.x, floorY, npc.position.z);
     npc.group.rotation.y = npc.yaw;
+
+    if (npc.seatDwell) {
+      const station = stations.find((candidate) => candidate.id === npc.seatDwell?.seatId);
+      const stayedInPlace = Math.hypot(
+        npc.position.x - npc.seatDwell.x,
+        npc.position.z - npc.seatDwell.z
+      ) <= AVATAR_SEAT_STABILITY_TOLERANCE;
+      const stayedAtSeat = station !== undefined && Math.hypot(
+        station.x - npc.position.x,
+        station.z - npc.position.z
+      ) <= 0.18;
+
+      if (!stayedInPlace || !stayedAtSeat) {
+        // The avatar did not hold the seat approach position long enough;
+        // cancel seating and send it to a normal roam target instead.
+        npc.seatDwell = undefined;
+        sendNpcToRoam(npc, halfW, halfD, now);
+        changed = true;
+        continue;
+      }
+
+      if (now < npc.seatDwell.until) continue;
+
+      npc.seatDwell = undefined;
+      setMode(npc, 'working', now);
+      npc.modeUntil = now + 5200 + (npc.index % 8) * 420;
+      changed = true;
+      continue;
+    }
+
     if (now < npc.modeUntil) continue;
 
     npc.targetSeatId = undefined;
@@ -796,18 +842,86 @@ function createFullAvatarSlot(
   };
 }
 
-function buildAvatarObstacles(items: readonly FurnitureItem[]): AvatarObstacle[] {
-  return items
+function buildAvatarObstacles(
+  items: readonly FurnitureItem[],
+  walls: readonly InteriorWall[]
+): AvatarObstacle[] {
+  const itemObstacles = items
     .filter((item) => item.position && !isNonBlockingAvatarItem(item))
     .map((item) => ({
       id: item.id,
       x: item.position!.x,
       z: item.position!.z,
-      halfWidth: Math.max(0.08, item.width / 2),
-      halfDepth: Math.max(0.08, item.depth / 2),
+      halfWidth: Math.max(0.08, (item.collisionWidth ?? item.width) / 2),
+      halfDepth: Math.max(0.08, (item.collisionDepth ?? item.depth) / 2),
       rotation: item.rotation ?? 0,
       isSeat: isRtlsSeat(item),
     }));
+
+  return [...itemObstacles, ...buildAvatarWallObstacles(walls, items)];
+}
+
+function buildAvatarWallObstacles(
+  walls: readonly InteriorWall[],
+  items: readonly FurnitureItem[]
+): AvatarObstacle[] {
+  const obstacles: AvatarObstacle[] = [];
+
+  for (const wall of walls) {
+    const dx = wall.x2 - wall.x1;
+    const dz = wall.z2 - wall.z1;
+    const length = Math.hypot(dx, dz);
+    if (!Number.isFinite(length) || length < 0.01) continue;
+
+    const directionX = dx / length;
+    const directionZ = dz / length;
+    const centerX = (wall.x1 + wall.x2) / 2;
+    const centerZ = (wall.z1 + wall.z2) / 2;
+    let intervals: Array<[number, number]> = [[-length / 2, length / 2]];
+
+    // Keep door openings traversable. Windows remain solid because they do not
+    // create a floor-level passage for an avatar.
+    const doors = items.filter((item) => {
+      if (item.type !== 'door' || !item.position) return false;
+      const localAlong = (item.position.x - centerX) * directionX
+        + (item.position.z - centerZ) * directionZ;
+      const localPerpendicular = Math.abs(
+        -(item.position.x - centerX) * directionZ
+        + (item.position.z - centerZ) * directionX
+      );
+      return localPerpendicular <= AVATAR_WALL_OPENING_TOLERANCE
+        && localAlong + item.width / 2 >= -length / 2
+        && localAlong - item.width / 2 <= length / 2;
+    });
+
+    for (const door of doors) {
+      const localAlong = (door.position!.x - centerX) * directionX
+        + (door.position!.z - centerZ) * directionZ;
+      const openingStart = Math.max(-length / 2, localAlong - door.width / 2);
+      const openingEnd = Math.min(length / 2, localAlong + door.width / 2);
+      intervals = intervals.flatMap(([start, end]) => [
+        ...(start < openingStart ? [[start, openingStart] as [number, number]] : []),
+        ...(openingEnd < end ? [[openingEnd, end] as [number, number]] : []),
+      ]);
+    }
+
+    for (const [start, end] of intervals) {
+      const segmentLength = end - start;
+      if (segmentLength < 0.02) continue;
+      const segmentCenter = (start + end) / 2;
+      obstacles.push({
+        id: `wall:${wall.id}:${start.toFixed(3)}:${end.toFixed(3)}`,
+        x: centerX + directionX * segmentCenter,
+        z: centerZ + directionZ * segmentCenter,
+        halfWidth: segmentLength / 2,
+        halfDepth: AVATAR_WALL_THICKNESS / 2,
+        rotation: Math.atan2(directionZ, directionX),
+        isSeat: false,
+      });
+    }
+  }
+
+  return obstacles;
 }
 
 function isNonBlockingAvatarItem(item: FurnitureItem): boolean {
@@ -854,6 +968,7 @@ function isTargetApproachObstacle(
   z: number,
   targetSeatId?: string
 ): boolean {
+  if (obstacle.id.startsWith('wall:')) return false;
   const nearTarget = Math.hypot(x - target.x, z - target.z) <= 0.90;
   const targetIsThisSeat = obstacle.isSeat
     && nearTarget
@@ -1069,7 +1184,7 @@ function updateLodAssignments(
     npc.renderMode = 'full';
     if (slots.some((slot) => slot.assignedNpcIndex === index)) continue;
     const free = slots.find((slot) => slot.assignedNpcIndex === undefined && slot.avatarVariant === npc.avatarVariant);
-    if (free) assignSlot(free, npc);
+    if (free) assignSlot(THREE, free, npc);
   }
 
   // A selected device should remain visible even when currently outside the
@@ -1077,13 +1192,13 @@ function updateLodAssignments(
   if (priorityIndex >= 0 && npcs[priorityIndex]) npcs[priorityIndex].renderMode = 'full';
 }
 
-function assignSlot(slot: FullAvatarSlot, npc: NpcState): void {
+function assignSlot(THREE: ThreeModule, slot: FullAvatarSlot, npc: NpcState): void {
   slot.assignedNpcIndex = npc.index;
   slot.container.visible = true;
   slot.activeMode = undefined;
   slot.animationAccumulator = FULL_ANIMATION_STEP_SECONDS;
   slot.labelKey = '';
-  syncSlotAnimation(slot, npc.mode, true);
+  syncSlotAnimation(THREE, slot, npc.mode, true);
 }
 
 function releaseSlot(slot: FullAvatarSlot): void {
@@ -1115,7 +1230,7 @@ function updateFullAvatarSlots(
     slot.container.visible = true;
     slot.container.position.set(npc.position.x, floorY, npc.position.z);
     slot.container.rotation.y = npc.yaw;
-    syncSlotAnimation(slot, npc.mode);
+    syncSlotAnimation(THREE, slot, npc.mode);
 
     slot.animationAccumulator += delta;
     if (slot.animationAccumulator >= FULL_ANIMATION_STEP_SECONDS) {
@@ -1147,12 +1262,18 @@ function updateFullAvatarSlots(
   void THREE; // kept in the signature for future GPU timing hooks without changing the public hook.
 }
 
-function syncSlotAnimation(slot: FullAvatarSlot, mode: RtlsAvatarMode, immediate = false): void {
+function syncSlotAnimation(
+  THREE: ThreeModule,
+  slot: FullAvatarSlot,
+  mode: RtlsAvatarMode,
+  immediate = false
+): void {
   const next = slot.actions[mode];
   const previous = slot.activeMode ? slot.actions[slot.activeMode] : undefined;
   const fadeSeconds = immediate ? 0 : 0.18;
   const useIdleModel = mode === 'idle' && Boolean(slot.idleModel && slot.actions.idle);
   const useSittingModel = mode === 'working' && Boolean(slot.sittingModel && slot.actions.working);
+  const useStaticMaleStandingPose = mode === 'idle' && slot.avatarVariant === 'male';
 
   slot.walkingModel.visible = !useIdleModel && !useSittingModel;
   if (slot.idleModel) slot.idleModel.visible = useIdleModel;
@@ -1162,6 +1283,37 @@ function syncSlotAnimation(slot: FullAvatarSlot, mode: RtlsAvatarMode, immediate
   // pose. Keep the failure visible in the console instead of silently showing
   // a T-pose.
   if (mode === 'idle' && !useIdleModel) slot.walkingModel.visible = false;
+
+  // The supplied male idle clip contains a repeated right-arm gesture. Keep
+  // the clip only as a source for one standing pose; the RTLS state machine
+  // must expose just standing, walking, and sitting, not an extra waving state.
+  // The distant instanced crowd already uses a baked idle pose, so freezing the
+  // full-quality avatar here keeps both render paths consistent.
+  if (useStaticMaleStandingPose && next) {
+    if (slot.activeMode === mode && next.enabled) return;
+
+    if (previous && previous !== next) {
+      if (fadeSeconds > 0) previous.fadeOut(fadeSeconds);
+      else previous.stop();
+    }
+
+    next.enabled = true;
+    next.setEffectiveWeight(1);
+    next.setLoop(THREE.LoopOnce, 1);
+    next.clampWhenFinished = true;
+    next.paused = false;
+    next.reset().play();
+
+    const mixer = slot.idleMixer;
+    if (mixer) {
+      // Match cloneAndFitOfficeAvatar's stable initial sample instead of
+      // entering the animated clip at a frame where the arm may be raised.
+      mixer.setTime(Math.min(next.getClip().duration * 0.2, 0.25));
+      next.paused = true;
+    }
+    slot.activeMode = mode;
+    return;
+  }
 
   // walking -> walking GLB, idle -> idle GLB, working -> sitting GLB.
   if (!next) {
@@ -1225,6 +1377,22 @@ function occupiedSeatIds(npcs: readonly NpcState[]): ReadonlySet<string> {
       .map((npc) => npc.targetSeatId)
       .filter((seatId): seatId is string => Boolean(seatId))
   );
+}
+
+function findNearbyAvailableSeat(
+  npc: NpcState,
+  stations: readonly RtlsStation[],
+  npcs: readonly NpcState[]
+): RtlsStation | undefined {
+  const occupied = occupiedSeatIds(npcs);
+  return stations
+    .filter((station) => !occupied.has(station.id) || station.id === npc.targetSeatId)
+    .map((station) => ({
+      station,
+      distance: Math.hypot(station.x - npc.position.x, station.z - npc.position.z),
+    }))
+    .filter((candidate) => candidate.distance <= AVATAR_STUCK_SEAT_SEARCH_RADIUS)
+    .sort((a, b) => a.distance - b.distance)[0]?.station;
 }
 
 function createStatusLabel(
@@ -1305,6 +1473,52 @@ function pickTarget(
     z: rand(-halfD * 0.82, halfD * 0.82),
     kind: 'roam',
   };
+}
+
+function startSeatDwell(
+  npc: NpcState,
+  station: RtlsStation,
+  now: number,
+  snapToSeat = false
+): void {
+  if (snapToSeat) {
+    npc.position.x = station.x;
+    npc.position.z = station.z;
+  }
+  npc.target = { x: station.x, z: station.z };
+  npc.targetKind = 'seat';
+  npc.targetSeatId = station.id;
+  npc.targetFaceYaw = station.faceYaw;
+  npc.navigationPath = [];
+  npc.blockedFor = 0;
+  npc.stuckFor = 0;
+  npc.seatDwell = {
+    seatId: station.id,
+    x: npc.position.x,
+    z: npc.position.z,
+    until: now + rand(AVATAR_SEAT_DWELL_MIN_SECONDS, AVATAR_SEAT_DWELL_MAX_SECONDS) * 1000,
+  };
+  setMode(npc, 'idle', now);
+  npc.modeUntil = npc.seatDwell.until;
+}
+
+function pickRoamTarget(halfW: number, halfD: number): { x: number; z: number } {
+  return {
+    x: rand(-halfW * 0.84, halfW * 0.84),
+    z: rand(-halfD * 0.82, halfD * 0.82),
+  };
+}
+
+function sendNpcToRoam(npc: NpcState, halfW: number, halfD: number, now: number): void {
+  npc.seatDwell = undefined;
+  npc.target = pickRoamTarget(halfW, halfD);
+  npc.targetKind = 'roam';
+  npc.targetSeatId = undefined;
+  npc.targetFaceYaw = undefined;
+  npc.navigationPath = [];
+  npc.blockedFor = 0;
+  npc.stuckFor = 0;
+  setMode(npc, 'walking', now);
 }
 
 function rand(min: number, max: number): number {

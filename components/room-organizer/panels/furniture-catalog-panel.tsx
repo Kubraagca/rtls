@@ -1,15 +1,16 @@
 'use client';
 
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { CATALOG_DRAG_MIME } from '../lib/catalog-drag';
 import { CCTV_MODELS } from '../lib/cctv-models';
-import { CATEGORIES } from '../lib/constants';
 import { CctvMenu } from './cctv-menu';
 import type { CatalogItem, CategoryMeta, FurnitureCategory } from '../lib/types';
-import { removeCatalogItem, updateCatalogItem, useCatalogRegistry } from '../lib/catalog-registry';
+import { removeCatalogItem, updateCatalogItem, useCatalogCategories, useCatalogRegistry } from '../lib/catalog-registry';
 import { CatalogThumbnail } from './catalog-thumbnail';
+import { CatalogEditDialog } from './catalog-edit-dialog';
 
 type FilterKey = 'all' | FurnitureCategory;
 
@@ -30,12 +31,13 @@ export function FurnitureCatalogPanel({
 }: FurnitureCatalogPanelProps): JSX.Element {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [internalQuery, setInternalQuery] = useState('');
-  const [manage, setManage] = useState(false);
   const [editing, setEditing] = useState<CatalogItem | null>(null);
+  const [actionItem, setActionItem] = useState<CatalogItem | null>(null);
   const [editName, setEditName] = useState('');
   const [editCategory, setEditCategory] = useState<FurnitureCategory>('office');
   const [editThumbnail, setEditThumbnail] = useState<string | undefined>();
   const catalog = useCatalogRegistry();
+  const categories = useCatalogCategories();
   const query = controlledQuery ?? internalQuery;
   const setQuery = (next: string) => {
     if (onQueryChange) onQueryChange(next);
@@ -43,18 +45,11 @@ export function FurnitureCatalogPanel({
   };
 
   const startEdit = (item: CatalogItem) => {
+    setActionItem(null);
     setEditing(item);
     setEditName(item.name);
     setEditCategory(item.category);
     setEditThumbnail(item.customThumbnail);
-  };
-
-  const handleThumbnail = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setEditThumbnail(String(reader.result));
-    reader.readAsDataURL(file);
   };
 
   const saveEdit = () => {
@@ -71,6 +66,7 @@ export function FurnitureCatalogPanel({
   };
 
   const removeFromCatalog = (item: CatalogItem) => {
+    setActionItem(null);
     onRemoveCatalogItem?.(item);
     if (!onRemoveCatalogItem) removeCatalogItem(item);
     if (editing?.type === item.type) setEditing(null);
@@ -92,9 +88,6 @@ export function FurnitureCatalogPanel({
           <span>Eşya Kataloğu</span>
           <span className="flex items-center gap-2 text-[10px] font-normal text-muted-foreground">
             {filtered.length} items
-            <button type="button" className="rounded border px-1.5 py-0.5" onClick={() => setManage((value) => !value)}>
-              {manage ? 'Bitti' : 'Yönet'}
-            </button>
           </span>
         </CardTitle>
         <Input
@@ -107,20 +100,16 @@ export function FurnitureCatalogPanel({
       </CardHeader>
       <CardContent className="pt-3">
         {editing && (
-          <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-slate-800">
-            <div className="mb-2 font-semibold">Eşya bilgilerini düzenle</div>
-            <div className="grid gap-2">
-              <Input value={editName} onChange={(event) => setEditName(event.target.value)} placeholder="Eşya adı" />
-              <select className="h-9 rounded-md border bg-white px-2" value={editCategory} onChange={(event) => setEditCategory(event.target.value as FurnitureCategory)}>
-                {CATEGORIES.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
-              </select>
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleThumbnail} />
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded border px-2 py-1" onClick={() => setEditing(null)}>Vazgeç</button>
-                <button type="button" className="rounded bg-blue-600 px-2 py-1 text-white" onClick={saveEdit}>Kaydet</button>
-              </div>
-            </div>
-          </div>
+          <CatalogEditDialog
+            item={editing}
+            name={editName}
+            category={editCategory}
+            onNameChange={setEditName}
+            onCategoryChange={setEditCategory}
+            onThumbnailChange={setEditThumbnail}
+            onCancel={() => setEditing(null)}
+            onSave={saveEdit}
+          />
         )}
         {filter === 'security' ? (
           <CctvMenu variant="panel" onAdd={onAdd} />
@@ -132,7 +121,7 @@ export function FurnitureCatalogPanel({
           </p>
         ) : filter === 'all' && query.trim() === '' ? (
           <div className="max-h-[500px] overflow-y-auto pr-1 space-y-4">
-            {CATEGORIES.map((category) => {
+            {categories.map((category) => {
               const groupItems = filtered.filter((item) => item.category === category.key);
               if (groupItems.length === 0) return null;
               return (
@@ -144,7 +133,15 @@ export function FurnitureCatalogPanel({
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     {groupItems.map((item) => (
-                      <CatalogTile key={`${item.type}-${item.name}-${item.customModelId ?? ''}`} item={item} onAdd={onAdd} manage={manage} onEdit={startEdit} onRemove={removeFromCatalog} />
+                      <CatalogTile
+                        key={`${item.type}-${item.name}-${item.customModelId ?? ''}`}
+                        item={item}
+                        onAdd={onAdd}
+                        onEdit={startEdit}
+                        onRemove={removeFromCatalog}
+                        actionOpen={actionItem === item}
+                        onToggleActions={() => setActionItem((current) => current === item ? null : item)}
+                      />
                     ))}
                   </div>
                 </section>
@@ -154,7 +151,15 @@ export function FurnitureCatalogPanel({
         ) : (
           <div className="grid grid-cols-3 gap-2 max-h-[460px] overflow-y-auto pr-1">
             {filtered.map((item) => (
-              <CatalogTile key={`${item.type}-${item.name}-${item.customModelId ?? ''}`} item={item} onAdd={onAdd} manage={manage} onEdit={startEdit} onRemove={removeFromCatalog} />
+              <CatalogTile
+                key={`${item.type}-${item.name}-${item.customModelId ?? ''}`}
+                item={item}
+                onAdd={onAdd}
+                onEdit={startEdit}
+                onRemove={removeFromCatalog}
+                actionOpen={actionItem === item}
+                onToggleActions={() => setActionItem((current) => current === item ? null : item)}
+              />
             ))}
           </div>
         )}
@@ -173,6 +178,7 @@ interface CategoryRailProps {
 
 function CategoryRail({ filter, onSelect }: CategoryRailProps): JSX.Element {
   const catalog = useCatalogRegistry();
+  const categories = useCatalogCategories();
   const counts = new Map<FurnitureCategory, number>();
   catalog.forEach((item) => counts.set(item.category, (counts.get(item.category) ?? 0) + 1));
   return (
@@ -184,7 +190,7 @@ function CategoryRail({ filter, onSelect }: CategoryRailProps): JSX.Element {
         count={catalog.length}
         onClick={() => onSelect('all')}
       />
-      {CATEGORIES.filter((category) => category.key === 'security' || (counts.get(category.key) ?? 0) > 0).map((category) => (
+      {categories.filter((category) => category.key === 'security' || (counts.get(category.key) ?? 0) > 0).map((category) => (
         <CategoryButton
           key={category.key}
           active={filter === category.key}
@@ -230,16 +236,24 @@ function CategoryButton({ active, icon, label, count, onClick }: CategoryButtonP
 interface CatalogTileProps {
   item: CatalogItem;
   onAdd(item: CatalogItem): void;
-  manage?: boolean;
   onRemove?(item: CatalogItem): void;
   onEdit?(item: CatalogItem): void;
+  actionOpen: boolean;
+  onToggleActions(): void;
 }
 
-function CatalogTile({ item, onAdd, manage = false, onRemove, onEdit }: CatalogTileProps): JSX.Element {
+function CatalogTile({ item, onAdd, onRemove, onEdit, actionOpen, onToggleActions }: CatalogTileProps): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={() => { if (!manage) onAdd(item); }}
+    <div
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onAdd(item);
+        }
+      }}
+      onClick={() => onAdd(item)}
       title={`${item.name} — 3D alana sürükle veya ortaya eklemek için tıkla`}
       draggable
       onDragStart={(event) => {
@@ -251,14 +265,38 @@ function CatalogTile({ item, onAdd, manage = false, onRemove, onEdit }: CatalogT
       className="group relative flex flex-col items-stretch overflow-hidden rounded-xl border bg-gradient-to-b from-white to-slate-50 hover:from-amber-50 hover:to-amber-100 hover:border-amber-300 active:scale-[0.97] transition-all cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md"
     >
       <div className="relative flex items-center justify-center aspect-square text-3xl bg-slate-50 group-hover:bg-amber-50/60">
-        <CatalogThumbnail item={item} size={34} />
-        <button type="button" aria-label={`${item.name} sil`} title="Katalogdan ve sahneden sil" className="absolute right-1 top-1 rounded bg-red-600 px-1.5 py-1 text-sm leading-none text-white" onClick={(event) => { event.stopPropagation(); onRemove?.(item); }}>🗑</button>
-        <button type="button" aria-label={`${item.name} düzenle`} title="Eşyayı düzenle" className="absolute left-1 top-1 rounded bg-blue-600 px-1.5 py-1 text-sm leading-none text-white" onClick={(event) => { event.stopPropagation(); onEdit?.(item); }}>✎</button>
+        <CatalogThumbnail item={item} size={58} />
+        <button
+          type="button"
+          aria-label={`${item.name} işlemleri`}
+          aria-expanded={actionOpen}
+          title="Eşya işlemleri"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); onToggleActions(); }}
+          className="absolute right-1 top-1 z-10 grid h-6 w-6 place-items-center rounded-md border border-white/70 bg-slate-900/70 text-white shadow-sm transition-colors hover:bg-blue-600"
+        >
+          <Pencil size={12} strokeWidth={2.5} />
+        </button>
+        {actionOpen && (
+          <div
+            role="menu"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            className="absolute right-1 top-8 z-20 grid min-w-[88px] gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 text-white shadow-lg"
+          >
+            <button type="button" role="menuitem" onClick={() => onEdit?.(item)} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-left text-[10px] hover:bg-slate-700">
+              <Pencil size={11} /> Düzenle
+            </button>
+            <button type="button" role="menuitem" onClick={() => onRemove?.(item)} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-left text-[10px] text-red-200 hover:bg-red-900/60">
+              <Trash2 size={11} /> Sil
+            </button>
+          </div>
+        )}
       </div>
       <div className="px-1.5 py-1 text-center bg-background">
         <p className="text-[10px] leading-tight font-medium truncate">{item.name}</p>
       </div>
-    </button>
+    </div>
   );
 }
 

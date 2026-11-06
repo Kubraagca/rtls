@@ -26,7 +26,7 @@ export interface SidebarTabsProps {
 export function SidebarTabs({ active, onChange }: SidebarTabsProps): JSX.Element {
   return (
     <div
-      className="pc-glass pc-glass--dark sticky top-0 z-10"
+      className="pc-glass pc-glass--dark pc-sidebar-tabs sticky top-0 z-10"
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(4, 1fr)',

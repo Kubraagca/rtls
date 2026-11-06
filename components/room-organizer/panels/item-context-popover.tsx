@@ -1,6 +1,7 @@
 'use client';
 
 import { useId } from 'react';
+import { Eye } from 'lucide-react';
 import { useRoomEditor } from '../contexts';
 import { useSelection } from '../contexts';
 import { CCTV_MODELS, getCctvModel } from '../lib/cctv-models';
@@ -30,6 +31,8 @@ export interface ItemContextPopoverProps {
   onDuplicate(id: string): void;
   onRotate(id: string): void;
   onToggleCameraBracket(id: string): void;
+  canUseAvatarView: boolean;
+  onAvatarView(): void;
   onClose(): void;
 }
 
@@ -45,14 +48,16 @@ export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element 
           aria-label={`${item.name} düzenle`}
       style={{
         position: 'absolute',
-        // Keep the editor below the top-right upload, floor, and wall controls
-        // so those controls never cover the item name or action row.
-        top: 248,
+        // Keep the selected item editor on the right side of the workspace.
+        top: 308,
         right: 16,
-        width: 296,
+        width: 360,
+        boxSizing: 'border-box',
+        minWidth: 0,
         padding: 0,
-        overflow: 'hidden',
-        zIndex: 28,
+        overflowX: 'hidden',
+        overflowY: 'hidden',
+        zIndex: 60,
       }}
     >
       <header
@@ -215,7 +220,10 @@ export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element 
           </button>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+        <div
+          className="pc-item-actions"
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 4, minWidth: 0 }}
+        >
           <ActionTile icon="rotate" label="Döndür" onClick={() => props.onRotate(item.id)} />
           <ActionTile
             icon="mirror"
@@ -232,6 +240,32 @@ export function ItemContextPopover(props: ItemContextPopoverProps): JSX.Element 
           <ActionTile icon="copy" label="Kopyala" onClick={() => props.onDuplicate(item.id)} />
           <ActionTile icon="target" label="Ortala" onClick={() => actions.moveItem(item.id, 0, 0)} />
         </div>
+
+        {props.canUseAvatarView && (
+          <button
+            type="button"
+            onClick={props.onAvatarView}
+            className="pc-tile"
+            aria-label="Avatar görüşü"
+            title="Avatarın gözünden ofiste gez"
+            style={{
+              width: '100%',
+              height: 34,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              fontFamily: 'var(--pc-font-display)',
+              fontWeight: 700,
+              fontSize: 11,
+              letterSpacing: 'var(--pc-tr-caps)',
+            }}
+          >
+            <Eye size={14} strokeWidth={2.2} />
+            AVATAR GÖRÜŞÜ
+          </button>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {DIMENSIONS.map((dimension) => (
@@ -333,8 +367,10 @@ function ActionTile({ icon, label, onClick, active }: ActionTileProps): JSX.Elem
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`pc-tile${active ? ' pc-tile--active' : ''}`}
+      className={`pc-tile pc-item-action-tile${active ? ' pc-tile--active' : ''}`}
       style={{
+        minWidth: 0,
+        overflow: 'visible',
         padding: 6,
         display: 'flex',
         flexDirection: 'column',
@@ -345,13 +381,16 @@ function ActionTile({ icon, label, onClick, active }: ActionTileProps): JSX.Elem
     >
       <Icon name={icon} size={16} />
       <span
+        className="pc-item-action-label"
         style={{
+          minWidth: 0,
           fontFamily: 'var(--pc-font-display)',
           fontWeight: 600,
           fontSize: 8,
           letterSpacing: 'var(--pc-tr-caps)',
           textTransform: 'uppercase',
           color: active ? 'var(--pc-cyan-glow)' : 'var(--pc-paper-soft)',
+          whiteSpace: 'nowrap',
         }}
       >
         {label}

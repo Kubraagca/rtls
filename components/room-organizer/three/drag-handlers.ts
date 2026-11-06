@@ -36,6 +36,7 @@ export interface SceneEventHandlers {
   onItemHover?: (info: HoverInfo | null) => void;
   onEmptyClick?: (x: number, z: number) => void;
   onWallSelect?: (info: { wallId: string; kind: 'exterior' | 'interior' }) => void;
+  onContextMenu?: (info: { clientX: number; clientY: number; surface: 'wall' | 'floor'; wallId?: string; wallKind?: 'exterior' | 'interior' }) => void;
   onFloorPointerMove?: (x: number, z: number) => void;
   onFloorPointerLeave?: () => void;
   snapPosition: (id: string, x: number, z: number) => { x: number; z: number };
@@ -378,11 +379,38 @@ export function attachDragHandlers({
     }
   };
 
+  const onContextMenu = (event: MouseEvent): void => {
+    const callback = handlersRef.current.onContextMenu;
+    if (!callback) return;
+    setPointerFromEvent(event);
+    raycaster.setFromCamera(pointer, camera);
+    const wallObjects = scene.children.filter(
+      (obj) => obj.userData.type === 'wall' || obj.userData.type === 'interior-wall'
+    );
+    const wallHit = raycaster.intersectObjects(wallObjects, false).find((hit) => hit.object.visible);
+    if (wallHit) {
+      const kind = wallHit.object.userData.type === 'interior-wall' ? 'interior' : 'exterior';
+      callback({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        surface: 'wall',
+        wallId: wallHit.object.userData.wallId as string | undefined,
+        wallKind: kind,
+      });
+      return;
+    }
+    const floorObjects = scene.children.filter((obj) => obj.userData.type === 'floor');
+    if (raycaster.intersectObjects(floorObjects, false).some((hit) => hit.object.visible)) {
+      callback({ clientX: event.clientX, clientY: event.clientY, surface: 'floor' });
+    }
+  };
+
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerCancel);
   canvas.addEventListener('pointerleave', onPointerLeave);
+  canvas.addEventListener('contextmenu', onContextMenu);
 
   return () => {
     canvas.removeEventListener('pointerdown', onPointerDown);
@@ -390,6 +418,7 @@ export function attachDragHandlers({
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerCancel);
     canvas.removeEventListener('pointerleave', onPointerLeave);
+    canvas.removeEventListener('contextmenu', onContextMenu);
   };
 }
 

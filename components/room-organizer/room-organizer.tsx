@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Paintbrush, Pencil } from 'lucide-react';
+import { Paintbrush, Pencil, Plus } from 'lucide-react';
 import { FloorPlanEditor } from './canvas-2d/floor-plan-editor';
 import { worldPositionFrom2DClient } from './canvas-2d/render';
 import { RoomEditorProvider, type RoomEditorContextValue } from './contexts/room-editor-context';
@@ -44,55 +44,12 @@ import { SidebarDrawer } from './panels/sidebar-drawer';
 import { TouchModeToggle } from './panels/touch-mode-toggle';
 import { TwinzoLiveHud } from './panels/twinzo-live-hud';
 import { Viewport } from './panels/viewport';
-import { WallDisplayPill } from './panels/wall-display-pill';
 import { WallPaintPanel } from './panels/wall-paint-panel';
 import { WelcomeBanner } from './panels/welcome-banner';
 import type { HoverInfo } from './hooks/use-three-scene';
 import type { GameMode } from './lib/types';
 
 import type { CatalogItem, RoomLayout, ViewSettings, WallId } from './lib/types';
-
-function orbitCamera(
-  THREE: typeof import('three'),
-  camera: import('three').PerspectiveCamera,
-  controls: import('three/examples/jsm/controls/OrbitControls.js').OrbitControls,
-  direction: 'left' | 'right' | 'up' | 'down'
-): void {
-  const offset = camera.position.clone().sub(controls.target);
-  const spherical = new THREE.Spherical().setFromVector3(offset);
-  const step = 0.22;
-  switch (direction) {
-    case 'left':
-      spherical.theta += step;
-      break;
-    case 'right':
-      spherical.theta -= step;
-      break;
-    case 'up':
-      spherical.phi = Math.max(0.15, spherical.phi - step / 2);
-      break;
-    case 'down':
-      spherical.phi = Math.min(Math.PI / 2.2, spherical.phi + step / 2);
-      break;
-  }
-  offset.setFromSpherical(spherical);
-  camera.position.copy(controls.target).add(offset);
-  controls.update();
-}
-
-function zoomCamera(
-  camera: import('three').PerspectiveCamera,
-  controls: import('three/examples/jsm/controls/OrbitControls.js').OrbitControls,
-  direction: '+' | '-'
-): void {
-  const offset = camera.position.clone().sub(controls.target);
-  const factor = direction === '+' ? 0.72 : 1.32;
-  offset.multiplyScalar(factor);
-  const distance = Math.max(controls.minDistance, Math.min(controls.maxDistance, offset.length()));
-  offset.setLength(distance);
-  camera.position.copy(controls.target).add(offset);
-  controls.update();
-}
 
 function distanceToSegment(point: { x: number; z: number }, wall: { x1: number; z1: number; x2: number; z2: number }): number {
   const dx = wall.x2 - wall.x1;
@@ -105,7 +62,10 @@ function distanceToSegment(point: { x: number; z: number }, wall: { x1: number; 
 
 
 const INITIAL_VIEW_SETTINGS: ViewSettings = {
-  view2D: false,
+  // The plan editor is the lightweight working surface. Loading the detailed
+  // WebGL scene (and its optional GLB assets) is deferred until 3D Görünüm is
+  // explicitly selected, so the UI is responsive immediately on modest PCs.
+  view2D: true,
   backgroundColor: '#dceefb',
   backgroundImage: null,
   showMeasurements: true,
@@ -181,8 +141,11 @@ export function RoomOrganizer(): JSX.Element {
   const [measurementPoints, setMeasurementPoints] = useState<ReadonlyArray<{ x: number; z: number }>>([]);
   const [wallDraft, setWallDraft] = useState<{ x: number; z: number } | null>(null);
   const [wallChainStart, setWallChainStart] = useState<{ x: number; z: number } | null>(null);
-  const [twoDPaintAnchor, setTwoDPaintAnchor] = useState<{ x: number; y: number } | null>(null);
-  const [twoDPaintOpen, setTwoDPaintOpen] = useState(false);
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [contextPlacement, setContextPlacement] = useState<{ x: number; z: number } | null>(null);
+  const [paintDialogOpen, setPaintDialogOpen] = useState(false);
+  const [contextPaintSurface, setContextPaintSurface] = useState<'walls' | 'floor'>('floor');
+  const [contextPaintWall, setContextPaintWall] = useState<{ id: string; kind: 'exterior' | 'interior' } | null>(null);
   const [pointerWorld, setPointerWorld] = useState<{ x: number; z: number } | null>(null);
   const pointerFrameRef = useRef<number | null>(null);
   const pendingPointerWorldRef = useRef<{ x: number; z: number } | null>(null);
@@ -610,10 +573,28 @@ export function RoomOrganizer(): JSX.Element {
 
   useEffect(() => {
     if (!view.view2D) {
-      setTwoDPaintAnchor(null);
-      setTwoDPaintOpen(false);
+      setContextMenuAnchor(null);
+      setContextPlacement(null);
+      setPaintDialogOpen(false);
     }
   }, [view.view2D]);
+
+  // A context action menu is temporary: any left click outside the FABs or
+  // the panel they opened dismisses it. Keep the action surface itself alive
+  // so clicking a FAB can still open its modal before the menu is removed.
+  useEffect(() => {
+    if (!contextMenuAnchor) return undefined;
+    const dismissContextMenu = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-context-action-surface]')) return;
+      setContextMenuAnchor(null);
+      setContextPlacement(null);
+      setPaintDialogOpen(false);
+    };
+    window.addEventListener('pointerdown', dismissContextMenu);
+    return () => window.removeEventListener('pointerdown', dismissContextMenu);
+  }, [contextMenuAnchor]);
 
   // Floor switch: drop any in-progress wall draft and selection (those live on
   // the previous floor) and slide the camera target up/down to the new floor.
@@ -915,6 +896,10 @@ export function RoomOrganizer(): JSX.Element {
     onHydrate: useCallback(
       (saved: RoomLayout) => {
         actions.applyLayout(saved);
+        // The active floor is UI state rather than part of the saved layout.
+        // Open the added second floor by default whenever the loaded building
+        // has one, while keeping single-floor layouts on their only floor.
+        actions.setActiveFloorIndex(saved.floors.length > 1 ? 1 : 0);
         selectOnly(null);
         history.clear();
       },
@@ -926,6 +911,29 @@ export function RoomOrganizer(): JSX.Element {
     () => (selectedItemId ? activeFloor.items.find((item) => item.id === selectedItemId) ?? null : null),
     [activeFloor.items, selectedItemId]
   );
+
+  const selectedItemCanUseAvatarView = Boolean(
+    !view.view2D
+      && selectedItem?.position
+      && (selectedItem.type === 'office-avatar'
+        || selectedItem.type === 'female-office-avatar'
+        || (selectedItem.type === 'custom-glb' && selectedItem.category === 'people'))
+  );
+
+  const toggleAvatarView = useCallback(() => {
+    if (walkthroughActive) {
+      setView((v) => ({ ...v, walkthroughMode: false }));
+      return;
+    }
+    if (!selectedItem?.position || !selectedItemCanUseAvatarView) return;
+    setPossessedAvatar({
+      id: selectedItem.id,
+      position: { ...selectedItem.position },
+      rotation: selectedItem.rotation ?? 0,
+      eyeHeight: activeFloorY + (selectedItem.elevation ?? 0) + selectedItem.height * 0.93,
+    });
+    setView((v) => ({ ...v, walkthroughMode: true, drawWallMode: false }));
+  }, [activeFloorY, selectedItem, selectedItemCanUseAvatarView, walkthroughActive]);
 
   const hasSignalItems = useMemo(
     () => activeFloor.items.some((item) => item.isWiFiAccessPoint || item.isCCTV),
@@ -947,6 +955,7 @@ export function RoomOrganizer(): JSX.Element {
   const { isReady, error, invalidate, requestShadowUpdate, threeModuleRef, sceneRef, rendererRef, cameraRef, controlsRef, worldPositionFromClient } =
     useThreeScene({
       canvasRef,
+      enabled: !view.view2D,
       maxZoomDistance,
       walkthroughActive,
       onItemSelect: handleSelect,
@@ -961,6 +970,15 @@ export function RoomOrganizer(): JSX.Element {
       onEmptyClick: handleEmptyClick,
       onWallSelect: ({ wallId, kind }) => {
         setSelectedWall({ id: wallId, kind });
+      },
+      onContextMenu: ({ clientX, clientY, surface, wallId, wallKind }) => {
+        const wall = surface === 'wall' && wallId && wallKind ? { id: wallId, kind: wallKind } : null;
+        setSelectedWall(wall);
+        setContextPaintWall(wall);
+        setContextPaintSurface(surface === 'wall' ? 'walls' : 'floor');
+        setContextMenuAnchor({ x: clientX, y: clientY });
+        setPaintDialogOpen(false);
+        setContextPlacement(worldPositionFromClient(clientX, clientY));
       },
       // Only track the floor pointer while wall-draw mode consumes it — the
       // handler writes React state per mousemove, re-rendering the whole tree,
@@ -1093,6 +1111,8 @@ export function RoomOrganizer(): JSX.Element {
     roomWidth: layout.width,
     roomDepth: layout.height,
     items: activeFloor.items,
+    boundaryWalls: layout.boundaryWalls,
+    interiorWalls: activeFloor.interiorWalls,
     floorY: activeFloorY,
     paused: gameMode === 'live' && livePaused,
     showLabels: gameMode === 'live' ? liveLayers.labels : true,
@@ -1419,6 +1439,7 @@ export function RoomOrganizer(): JSX.Element {
         on2DMouseUp={handle2DWallMouseUp}
         on2DMouseLeave={handleFloorPointerLeave}
         on2DWheel={handle2DWheel}
+        on3DContextMenu={() => undefined}
         hover={
           hover &&
           (() => {
@@ -1485,9 +1506,19 @@ export function RoomOrganizer(): JSX.Element {
               }}
               onPointerDown={handle2DWallMouseDown}
               onPointerUp={handle2DWallMouseUp}
-              onContextMenu={(clientX, clientY) => {
-                setTwoDPaintAnchor({ x: clientX, y: clientY });
-                setTwoDPaintOpen(false);
+              onContextMenu={(clientX, clientY, surface) => {
+                const canvas = canvas2DRef.current;
+                const wall = surface?.kind === 'wall'
+                  ? { id: surface.id, kind: surface.wallKind }
+                  : null;
+                setSelectedWall(wall);
+                setContextPaintWall(wall);
+                setContextPaintSurface(surface?.kind === 'wall' ? 'walls' : 'floor');
+                setContextMenuAnchor({ x: clientX, y: clientY });
+                setPaintDialogOpen(false);
+                setContextPlacement(canvas
+                  ? worldPositionFrom2DClient(canvas, layout, clientX, clientY, planCamera)
+                  : null);
               }}
               snapWallEndpoint={snap2DWallEndpoint}
             />
@@ -1495,53 +1526,126 @@ export function RoomOrganizer(): JSX.Element {
         }
       />
 
-      {view.view2D && twoDPaintAnchor && (
+      {contextMenuAnchor && (
         <>
-          {!twoDPaintOpen && (
+          {!paintDialogOpen && (
+            <>
+            <CustomGlbUpload
+              trigger={(open) => contextMenuAnchor ? (
+                <button
+                  type="button"
+                  aria-label="Sahneye GLB eşya ekle"
+                  title="Sahneye GLB eşya ekle"
+                  className="pc-glass pc-glass--dark pc-tile"
+                  onClick={() => {
+                    open();
+                  }}
+                  data-context-action-surface
+                  style={{
+                    position: 'fixed',
+                    left: Math.min(Math.max(contextMenuAnchor.x, 28), window.innerWidth - 28),
+                    top: Math.min(Math.max(contextMenuAnchor.y - 44, 22), window.innerHeight - 22),
+                    width: 40,
+                    height: 40,
+                    padding: 0,
+                    borderRadius: '50%',
+                    zIndex: 70,
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: '#fff',
+                    border: '1px solid rgba(100, 110, 118, 0.12)',
+                    color: '#62686d',
+                    boxShadow: '0 5px 14px rgba(35, 45, 52, 0.22)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Plus size={18} strokeWidth={2.2} />
+                </button>
+              ) : null}
+              onAdd={(catalogItem) => {
+                const target = contextPlacement ?? controlsRef.current?.target;
+                const id = placeCatalogItem(
+                  catalogItem,
+                  target ? { x: target.x, z: target.z } : undefined
+                );
+                setContextMenuAnchor(null);
+                setContextPlacement(null);
+                if (!id) return;
+                selectOnly(id);
+                playCue('place');
+                invalidate();
+              }}
+            />
             <button
               type="button"
               aria-label="Zemin rengini değiştir"
               title="Zemin rengini değiştir"
               className="pc-glass pc-glass--dark pc-tile"
-              onClick={() => setTwoDPaintOpen(true)}
+              onClick={() => setPaintDialogOpen(true)}
+              data-context-action-surface
               style={{
                 position: 'fixed',
-                left: Math.min(twoDPaintAnchor.x, Math.max(8, window.innerWidth - 54)),
-                top: Math.min(twoDPaintAnchor.y, Math.max(8, window.innerHeight - 54)),
-                width: 42,
-                height: 42,
+                left: Math.min(Math.max(contextMenuAnchor.x + 44, 22), window.innerWidth - 22),
+                top: Math.min(Math.max(contextMenuAnchor.y, 22), window.innerHeight - 22),
+                width: 40,
+                height: 40,
                 padding: 0,
-                borderRadius: 12,
+                borderRadius: '50%',
                 zIndex: 70,
                 display: 'grid',
                 placeItems: 'center',
-                color: 'var(--pc-cyan-glow)',
+                background: '#fff',
+                border: '1px solid rgba(100, 110, 118, 0.12)',
+                color: '#62686d',
+                boxShadow: '0 5px 14px rgba(35, 45, 52, 0.22)',
                 cursor: 'pointer',
               }}
             >
-              <Paintbrush size={19} strokeWidth={2.1} />
+              <Paintbrush size={17} strokeWidth={2.1} />
             </button>
+            </>
           )}
-          {twoDPaintOpen && (
+          {paintDialogOpen && (
             <div
+              data-context-action-surface
+              role="presentation"
               style={{
                 position: 'fixed',
-                left: Math.min(twoDPaintAnchor.x, Math.max(8, window.innerWidth - 304)),
-                top: Math.min(twoDPaintAnchor.y, Math.max(8, window.innerHeight - 430)),
-                zIndex: 70,
+                inset: 0,
+                zIndex: 80,
+                display: 'grid',
+                placeItems: 'center',
+                padding: 16,
+                // Keep the room readable while the paint dialog is open. The
+                // dialog itself has enough contrast; blurring/dimming the
+                // scene makes it hard to judge the colour being applied.
+                background: 'rgba(255, 255, 255, 0.04)',
               }}
-              onPointerDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                if (event.target === event.currentTarget) {
+                  setPaintDialogOpen(false);
+                  setContextMenuAnchor(null);
+                  setContextPlacement(null);
+                }
+              }}
             >
-              <WallPaintPanel
-                selectedWall={null}
-                onSelectedWallChange={() => undefined}
-                initialSurface="floor"
-                floorOnly
-                onClose={() => {
-                  setTwoDPaintOpen(false);
-                  setTwoDPaintAnchor(null);
-                }}
-              />
+              <div role="dialog" aria-modal="true" aria-label={contextPaintSurface === 'walls' ? 'Duvar boyama' : 'Zemin boyama'}>
+                <WallPaintPanel
+                  selectedWall={contextPaintWall}
+                  onSelectedWallChange={(wall) => {
+                    setSelectedWall(wall);
+                    setContextPaintWall(wall);
+                  }}
+                  initialSurface={contextPaintSurface}
+                  surfaceOnly={contextPaintSurface}
+                  onClose={() => {
+                    setPaintDialogOpen(false);
+                    setContextMenuAnchor(null);
+                    setContextPlacement(null);
+                  }}
+                />
+              </div>
             </div>
           )}
         </>
@@ -1609,24 +1713,25 @@ export function RoomOrganizer(): JSX.Element {
           gap: 8,
         }}
       >
-        <CustomGlbUpload
-          onAdd={(catalogItem) => {
-            const target = controlsRef.current?.target;
-            const id = placeCatalogItem(
-              catalogItem,
-              target ? { x: target.x, z: target.z } : undefined
-            );
-            if (!id) return;
-            selectOnly(id);
-            playCue('place');
-            invalidate();
-          }}
-        />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button
           type="button"
           className="pc-glass pc-glass--dark pc-tile"
-          onClick={() => setView((v) => ({ ...v, view2D: !v.view2D, drawWallMode: v.view2D ? false : v.drawWallMode, walkthroughMode: false }))}
+          onClick={() => {
+            // The item editor belongs to the 3D workspace. Clear the active
+            // selection before entering 2D so its floating panel cannot cover
+            // the floor-plan editor.
+            if (!view.view2D) {
+              selectOnly(null);
+              setSelectedWall(null);
+            }
+            setView((v) => ({
+              ...v,
+              view2D: !v.view2D,
+              drawWallMode: v.view2D ? false : v.drawWallMode,
+              walkthroughMode: false,
+            }));
+          }}
           style={{
             padding: '8px 12px',
             borderRadius: 10,
@@ -1638,36 +1743,6 @@ export function RoomOrganizer(): JSX.Element {
         >
           {view.view2D ? '3D Görünüm' : '2D Plan'}
         </button>
-        {!view.view2D && <button
-          type="button"
-          className={`pc-glass pc-glass--dark pc-tile${view.walkthroughMode ? ' pc-tile--active' : ''}`}
-          disabled={!walkthroughActive && !(selectedItem?.position && (selectedItem.type === 'office-avatar' || selectedItem.type === 'female-office-avatar' || (selectedItem.type === 'custom-glb' && selectedItem.category === 'people')))}
-          onClick={() => {
-            if (walkthroughActive) {
-              setView((v) => ({ ...v, walkthroughMode: false }));
-              return;
-            }
-            if (!selectedItem?.position) return;
-            setPossessedAvatar({ id: selectedItem.id, position: { ...selectedItem.position }, rotation: selectedItem.rotation ?? 0, eyeHeight: activeFloorY + (selectedItem.elevation ?? 0) + selectedItem.height * 0.93 });
-            setView((v) => ({ ...v, walkthroughMode: true, drawWallMode: false }));
-          }}
-          aria-pressed={view.walkthroughMode}
-          title="Avatarın gözünden ofiste gez"
-          style={{
-            padding: '8px 12px',
-            borderRadius: 10,
-            fontFamily: 'var(--pc-font-display)',
-            fontSize: 10,
-            fontWeight: 800,
-            letterSpacing: '0.04em',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <Eye size={13} strokeWidth={2.2} />
-          {view.walkthroughMode ? 'GEZİNTİYİ BİTİR' : 'AVATAR GÖRÜŞÜ'}
-        </button>}
         {view.view2D && <button
           type="button"
           className={`hidden pc-glass pc-glass--dark pc-tile${view.drawWallMode ? ' pc-tile--active' : ''}`}
@@ -1705,7 +1780,6 @@ export function RoomOrganizer(): JSX.Element {
         </div>
         </div>
         <FloorPill />
-        <WallDisplayPill />
         <ModePanel
           onSetMode={(mode) => {
             setGameMode(mode);
@@ -1729,7 +1803,7 @@ export function RoomOrganizer(): JSX.Element {
           }}
           style={{
             position: 'absolute',
-            top: 128,
+            top: 104,
             right: 16,
             zIndex: 60,
             padding: '10px 14px',
@@ -1759,6 +1833,8 @@ export function RoomOrganizer(): JSX.Element {
             playCue('rotate');
           }}
           onToggleCameraBracket={toggleCameraBracket}
+          canUseAvatarView={selectedItemCanUseAvatarView}
+          onAvatarView={toggleAvatarView}
           onDuplicate={duplicateSelected}
           onRemove={removeItem}
           onClose={() => {
@@ -1790,28 +1866,6 @@ export function RoomOrganizer(): JSX.Element {
       )}
 
       <BottomHud
-        selectedWall={selectedWall}
-        onSelectedWallChange={setSelectedWall}
-        onOrbit={(direction) => {
-          const THREE = threeModuleRef.current;
-          const camera = cameraRef.current;
-          const controls = controlsRef.current;
-          if (THREE && camera && controls)
-            orbitCamera(THREE, camera, controls, direction);
-        }}
-        onZoom={(direction) => {
-          if (view.view2D) {
-            setPlanCamera((current) => ({
-              ...current,
-              zoom: Math.max(0.5, Math.min(4, current.zoom * (direction === '+' ? 1.12 : 0.89))),
-            }));
-            return;
-          }
-          const camera = cameraRef.current;
-          const controls = controlsRef.current;
-          if (camera && controls) zoomCamera(camera, controls, direction);
-        }}
-        onFit={fitToRoom}
         onRemoveCatalogItem={removeCatalogItemAndPlacements}
         onUpdateCatalogItem={updateCatalogItemAndPlacements}
         placeCatalogItem={placeCatalogItem}

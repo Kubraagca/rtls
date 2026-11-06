@@ -1,5 +1,6 @@
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type * as ThreeNS from 'three';
 
@@ -38,6 +39,10 @@ let idleAnimationsLogged = false;
 let femaleOfficeAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
 let femaleOfficeIdleAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
 let femaleOfficeSittingAvatarPromise: Promise<OfficeAvatarAsset | null> | null = null;
+
+function makeGltfLoader(): GLTFLoader {
+  return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+}
 /**
  * Load the user-supplied rigged GLB first. The legacy OBJ remains only as a
  * defensive visual fallback; OBJ cannot carry the skeleton/animation clips.
@@ -45,7 +50,7 @@ let femaleOfficeSittingAvatarPromise: Promise<OfficeAvatarAsset | null> | null =
 export function loadOfficeAvatar(THREE: typeof import('three')): Promise<OfficeAvatarAsset | null> {
   if (officeAvatarPromise) return officeAvatarPromise;
 
-  officeAvatarPromise = new GLTFLoader()
+  officeAvatarPromise = makeGltfLoader()
     .loadAsync(OFFICE_AVATAR_GLB_PATH)
     .then((gltf) => {
       const scene = gltf.scene;
@@ -91,7 +96,7 @@ export function loadOfficeSittingAvatar(THREE: typeof import('three')): Promise<
   void THREE;
   if (officeSittingAvatarPromise) return officeSittingAvatarPromise;
 
-  officeSittingAvatarPromise = new GLTFLoader()
+  officeSittingAvatarPromise = makeGltfLoader()
     .loadAsync(OFFICE_AVATAR_SITTING_GLB_PATH)
     .then((gltf) => {
       const scene = gltf.scene;
@@ -121,7 +126,7 @@ export function loadOfficeIdleAvatar(
     return officeIdleAvatarPromise;
   }
 
-  officeIdleAvatarPromise = new GLTFLoader()
+  officeIdleAvatarPromise = makeGltfLoader()
     .loadAsync(OFFICE_AVATAR_IDLE_GLB_PATH)
     .then((gltf) => {
       if (!idleAnimationsLogged) {
@@ -160,7 +165,7 @@ function loadFemaleAvatarAsset(
   cache: { current: Promise<OfficeAvatarAsset | null> | null }
 ): Promise<OfficeAvatarAsset | null> {
   if (cache.current) return cache.current;
-  cache.current = new GLTFLoader().loadAsync(path).then((gltf) => {
+  cache.current = makeGltfLoader().loadAsync(path).then((gltf) => {
     const scene = gltf.scene;
     prepareGlbAvatar(scene);
     scene.userData.assetSource = sourceName;

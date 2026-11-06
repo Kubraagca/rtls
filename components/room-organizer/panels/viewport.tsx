@@ -44,13 +44,16 @@ export interface ViewportProps {
   on2DMouseUp?(): void;
   on2DMouseLeave?(): void;
   on2DWheel?(deltaY: number, clientX: number, clientY: number): void;
+  on3DContextMenu?(clientX: number, clientY: number): void;
   onCatalogDrop?(clientX: number, clientY: number, type: string): void;
   twoDPlanEditor?: React.ReactNode;
 }
 
 export function Viewport(props: ViewportProps): JSX.Element {
-  const showLoading = !props.isReady && !props.error;
-  const showError = Boolean(props.error);
+  // The lightweight 2D plan never initializes WebGL, by design. Its canvas
+  // can render immediately, so a WebGL loading state must not cover it.
+  const showLoading = !props.view2D && !props.isReady && !props.error;
+  const showError = !props.view2D && Boolean(props.error);
   const [, setPlanPreviewRevision] = useState(0);
   useEffect(() => onPlanSpritesReady(() => setPlanPreviewRevision((revision) => revision + 1)), []);
 
@@ -167,6 +170,11 @@ export function Viewport(props: ViewportProps): JSX.Element {
           }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            props.on3DContextMenu?.(event.clientX, event.clientY);
+          }}
         />
 
         {showLoading && <LoadingOverlay />}
@@ -417,7 +425,7 @@ function ViewportOverlays(props: ViewportProps): JSX.Element {
 
       {props.selectionCount !== undefined && props.selectionCount > 1 && (
         <div
-          className="pointer-events-none absolute top-4 left-1/2"
+          className="pointer-events-none absolute top-4 left-1/2 pc-selection-status"
           style={{ transform: 'translateX(-50%)' }}
         >
           <StatusChip intent="accent">
@@ -442,7 +450,7 @@ function ViewportOverlays(props: ViewportProps): JSX.Element {
             }}
           />
           <div
-            className="pointer-events-none absolute bottom-4 left-1/2"
+            className="pointer-events-none absolute bottom-4 left-1/2 pc-walkthrough-status"
             style={{ transform: 'translateX(-50%)' }}
           >
             <StatusChip intent="accent">
@@ -455,7 +463,7 @@ function ViewportOverlays(props: ViewportProps): JSX.Element {
 
       {props.measurementPointsPlaced !== undefined &&
         props.measurementPointsPlaced > 0 && (
-          <div className="absolute top-4 right-4">
+          <div className="absolute top-4 right-4 pc-measurement-status">
             <StatusChip intent="info">
               <Icon name="ruler" size={14} />
               {props.measurementPointsPlaced === 1

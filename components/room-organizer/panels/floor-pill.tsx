@@ -21,7 +21,7 @@ export function FloorPill(): JSX.Element {
 
   return (
     <div
-      className="pointer-events-auto pc-glass pc-glass--dark"
+      className="pointer-events-auto pc-glass pc-glass--dark pc-floor-pill"
       style={{
         padding: 6,
         display: 'flex',
@@ -95,7 +95,7 @@ export function FloorPill(): JSX.Element {
         disabled={!canAdd}
         title={canAdd ? 'Kat ekle' : `En fazla ${MAX_FLOORS} kat`}
         aria-label="Kat ekle"
-        className="pc-tile"
+        className="pc-tile pc-floor-add-button"
         style={{
           width: 26,
           height: 26,

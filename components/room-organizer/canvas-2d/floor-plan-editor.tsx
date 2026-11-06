@@ -26,7 +26,7 @@ interface FloorPlanEditorProps {
   onPointerMove?(clientX: number, clientY: number): void;
   onPointerDown?(clientX: number, clientY: number): void;
   onPointerUp?(): void;
-  onContextMenu?(clientX: number, clientY: number): void;
+  onContextMenu?(clientX: number, clientY: number, surface?: { kind: 'wall'; id: string; wallKind: 'exterior' | 'interior' } | { kind: 'floor' }): void;
   drawWallMode?: boolean;
   snapPosition?(id: string, x: number, z: number): { x: number; z: number };
   /** Resolve a dragged wall endpoint onto a nearby junction. */
@@ -250,6 +250,7 @@ export function FloorPlanEditor({ layout, floor, activeFloorIndex = 0, selectedW
   };
 
   return <div ref={hostRef} className="pc-2d-editor" style={{ position: 'absolute', inset: 0, zIndex: 7 }}>
+    {selectedWall && (
     <div className="pc-2d-toolbar" aria-label="2D plan araçları">
       <div className="pc-2d-toolbar__title"><span className="pc-2d-toolbar__dot" />2D PLAN</div>
       {layout.floors.length > 1 && <span style={{ display: 'inline-flex', gap: 3, pointerEvents: 'auto' }}>
@@ -329,6 +330,7 @@ export function FloorPlanEditor({ layout, floor, activeFloorIndex = 0, selectedW
         </div>}
       </>}
     </div>
+    )}
     {size.width > 0 && <svg width={size.width} height={size.height} style={{ width: '100%', height: '100%', touchAction: 'none', pointerEvents: drawWallMode ? 'none' : 'auto' }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!drawWallMode) onContextMenu?.(event.clientX, event.clientY); }} onWheel={(event) => { event.preventDefault(); onWheel?.(event.deltaY, event.clientX, event.clientY); }} onPointerMove={(event) => { onPointerMove?.(event.clientX, event.clientY); move(event); }} onPointerLeave={(event) => onItemHover?.(null, event.clientX, event.clientY)} onPointerUp={endPointer} onPointerCancel={() => { setAreaStart(null); setAreaEnd(null); flushWallUpdate(); dragRef.current = null; itemPositionRef.current = null; onPointerUp?.(); }} onPointerDownCapture={(event) => { if (event.button !== 0) { event.preventDefault(); return; } if (event.altKey && event.target === event.currentTarget && !drawWallMode && onAreaSelect) { event.preventDefault(); event.stopPropagation(); const point = localPoint(event); setAreaStart(point); setAreaEnd(point); event.currentTarget.setPointerCapture(event.pointerId); return; } if (!drawWallMode) return; event.preventDefault(); event.stopPropagation(); onPointerDown?.(event.clientX, event.clientY); }} onPointerDown={(event) => { if (event.button !== 0 || drawWallMode || areaStart) return; onPointerDown?.(event.clientX, event.clientY); onSelectWall(null); onSelectItem(null); }}>
       {areaStart && areaEnd && <rect x={Math.min(areaStart.x, areaEnd.x)} y={Math.min(areaStart.y, areaEnd.y)} width={Math.abs(areaEnd.x - areaStart.x)} height={Math.abs(areaEnd.y - areaStart.y)} fill="rgba(25,198,209,.16)" stroke="#19c6d1" strokeDasharray="6 4" pointerEvents="none" />}
       {wallDraft && pointerWorld && <>
@@ -347,6 +349,11 @@ export function FloorPlanEditor({ layout, floor, activeFloorIndex = 0, selectedW
               if (drawWallMode) return;
               onSelectWall(wall.id, kind);
               start(event, { kind: 'wall', wall, x: event.clientX, y: event.clientY });
+            }} onContextMenu={(event) => {
+              if (drawWallMode) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onContextMenu?.(event.clientX, event.clientY, { kind: 'wall', id: wall.id, wallKind: kind });
             }} />
           {selected && (['start', 'end'] as const).map(endpoint => <circle key={endpoint}
             cx={sx(endpoint === 'start' ? wall.x1 : wall.x2)} cy={sy(endpoint === 'start' ? wall.z1 : wall.z2)}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, type RefObject, type MutableRefObject } from 'react';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { addFloorPlanRepaintHandler, render2DTopDown } from '../canvas-2d/render';
 import { hasCollisions } from '../lib/geometry';
 import { scheduleAssetLoad } from '../lib/asset-load-queue';
@@ -167,7 +168,7 @@ function isCatalogItemAvailable(
 function loadGltfAsset(path: string, priority = 0): Promise<ThreeNS.Object3D | null> {
   const cached = gltfCache.get(path);
   if (cached) return cached;
-  const promise = scheduleAssetLoad(`catalog:${path}`, priority, () => new GLTFLoader().loadAsync(path)
+  const promise = scheduleAssetLoad(`catalog:${path}`, priority, () => new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(path)
     .then((gltf) => gltf.scene))
     .catch(() => null);
   gltfCache.set(path, promise);

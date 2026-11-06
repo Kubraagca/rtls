@@ -1,11 +1,11 @@
 'use client';
 
-import { useRef, useState, type ChangeEvent } from 'react';
-import { CATEGORIES, MAX_ITEM_DIMENSION } from '../lib/constants';
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { MAX_ITEM_DIMENSION } from '../lib/constants';
 import { createCustomGlbId, inspectGlbBinary, MAX_CUSTOM_GLB_BYTES, saveCustomGlbAsset, type CustomGlbInspection } from '../lib/custom-glb-store';
 import type { CatalogItem, FurnitureCategory } from '../lib/types';
 import { inspectCustomGlbScene, renderCustomGlbTopThumbnail } from '../three/custom-gltf-assets';
-import { registerCatalogItem } from '../lib/catalog-registry';
+import { registerCatalogItem, useCatalogCategories } from '../lib/catalog-registry';
 
 interface PreviewInfo extends CustomGlbInspection {
   width: number;
@@ -17,6 +17,7 @@ interface PreviewInfo extends CustomGlbInspection {
 
 export interface CustomGlbUploadProps {
   onAdd(item: CatalogItem): void;
+  trigger?: (open: () => void) => ReactNode;
 }
 
 function cleanBaseName(fileName: string): string {
@@ -33,7 +34,7 @@ function parseDimension(value: string): number | null {
   return n;
 }
 
-export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
+export function CustomGlbUpload({ onAdd, trigger }: CustomGlbUploadProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
   const [width, setWidth] = useState('1.00');
   const [depth, setDepth] = useState('1.00');
   const [height, setHeight] = useState('1.00');
+  const categories = useCatalogCategories();
   const fileBufferRef = useRef<ArrayBuffer | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -155,7 +157,7 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
 
   return (
     <>
-      <button
+      {trigger ? trigger(() => setOpen(true)) : <button
         type="button"
         className="pc-glass pc-glass--dark pc-tile"
         onClick={() => setOpen(true)}
@@ -175,11 +177,12 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
       >
         <span style={{ fontSize: 16, lineHeight: 1 }}>＋</span>
         SAHNEYE EKLE
-      </button>
+      </button>}
 
       {open && (
         <div
           role="presentation"
+          data-context-action-surface
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) close();
           }}
@@ -288,7 +291,7 @@ export function CustomGlbUpload({ onAdd }: CustomGlbUploadProps): JSX.Element {
                       onChange={(e) => setCategory(e.target.value as FurnitureCategory)}
                       style={{ padding: '9px 10px', borderRadius: 9, background: '#17232d', color: 'white', border: '1px solid rgba(255,255,255,.13)' }}
                     >
-                      {CATEGORIES.map((entry) => (
+                      {categories.map((entry) => (
                         <option key={entry.key} value={entry.key}>{entry.label}</option>
                       ))}
                     </select>

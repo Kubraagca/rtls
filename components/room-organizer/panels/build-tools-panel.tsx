@@ -1,8 +1,11 @@
 'use client';
 
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Icon, type PlotcraftIconName } from '../plotcraft/icon';
 import type { FurnitureCategory } from '../lib/types';
+import { useCatalogCategories } from '../lib/catalog-registry';
+import { CATEGORIES } from '../lib/constants';
 
 export type BuildToolCategory = FurnitureCategory | 'all' | 'walls';
 
@@ -10,7 +13,8 @@ interface ToolSpec {
   key: BuildToolCategory;
   icon: PlotcraftIconName;
   label: string;
-  group: 'OFİS' | 'ALTYAPI' | 'MİMARİ';
+  group: 'OFİS' | 'ALTYAPI' | 'MİMARİ' | 'KULLANICI';
+  categoryIcon?: string;
 }
 
 const TOOLS: readonly ToolSpec[] = [
@@ -28,16 +32,167 @@ const TOOLS: readonly ToolSpec[] = [
   { key: 'walls',       icon: 'wall',    label: 'Duvarlar',      group: 'MİMARİ' },
 ];
 
-const TOOL_GROUPS = ['OFİS', 'ALTYAPI', 'MİMARİ'] as const;
+const TOOL_GROUPS = ['OFİS', 'ALTYAPI', 'MİMARİ', 'KULLANICI'] as const;
 
 export interface BuildToolsPanelProps {
   active: BuildToolCategory;
   drawWallMode: boolean;
   onSelect(tool: BuildToolCategory): void;
+  /** Use the compact vertical tool rail shown beside the scene. */
+  compact?: boolean;
+  onAddCatalog?(): void;
 }
 
 export function BuildToolsPanel(props: BuildToolsPanelProps): JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
+  const [compactExpanded, setCompactExpanded] = useState(false);
+  const categories = useCatalogCategories();
+  const customTools: readonly ToolSpec[] = categories
+    .filter((category) => !CATEGORIES.some((entry) => entry.key === category.key))
+    .map((category) => ({ key: category.key, icon: 'box', categoryIcon: category.icon, label: category.label, group: 'KULLANICI' }));
+  const tools = [...TOOLS, ...customTools];
+
+  if (props.compact) {
+    return (
+      <div
+        className="pointer-events-auto pc-glass pc-build-tools pc-build-tools--compact"
+        aria-label="Tasarım araçları"
+        style={{ width: compactExpanded ? 158 : 58, height: 'auto', padding: 6, borderRadius: 14, transition: 'width 160ms ease', position: 'relative' }}
+      >
+        <button
+          type="button"
+          onClick={() => setCompactExpanded((expanded) => !expanded)}
+          aria-label={compactExpanded ? 'Araç isimlerini gizle' : 'Araç isimlerini göster'}
+          title={compactExpanded ? 'Araç isimlerini gizle' : 'Araç isimlerini göster'}
+          className="pc-tile"
+          style={{
+            width: '100%',
+            height: 24,
+            marginBottom: 4,
+            padding: 0,
+            display: 'grid',
+            placeItems: 'center',
+            borderRadius: 7,
+          }}
+        >
+          {compactExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+        </button>
+        <div
+          className="pc-build-tools-grid"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 4,
+            padding: 2,
+            maxHeight: 'none',
+            overflowY: 'visible',
+          }}
+        >
+          {tools.map((tool, index) => {
+            const previous = tools[index - 1];
+            const isActive = props.active === tool.key || (tool.key === 'walls' && props.drawWallMode);
+            return (
+              <span key={tool.key} style={{ display: 'contents' }}>
+                {previous && previous.group !== tool.group && (
+                  <span aria-hidden style={{ width: 28, height: 1, margin: '2px 0', background: 'var(--pc-glass-inner)' }} />
+                )}
+                <button
+                  type="button"
+                  onClick={() => props.onSelect(tool.key)}
+                  title={tool.label}
+                  aria-label={tool.label}
+                  aria-pressed={isActive}
+                  className={`pc-tile${isActive ? ' pc-tile--active' : ''}`}
+                  style={{
+                    width: compactExpanded ? 136 : 42,
+                    height: 42,
+                    minHeight: 42,
+                    padding: 0,
+                    display: 'grid',
+                    placeItems: 'center',
+                    justifyContent: compactExpanded ? 'flex-start' : 'center',
+                    gridTemplateColumns: compactExpanded ? '20px 1fr' : undefined,
+                    gap: compactExpanded ? 9 : 0,
+                    borderRadius: 9,
+                  }}
+                >
+                  {tool.categoryIcon ? <span aria-hidden style={{ fontSize: 19, lineHeight: 1, position: 'relative', left: compactExpanded ? 4 : 0 }}>{tool.categoryIcon}</span> : <span style={{ position: 'relative', left: compactExpanded ? 4 : 0 }}><Icon name={tool.icon} size={20} /></span>}
+                  {compactExpanded && (
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'var(--pc-font-display)',
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        color: isActive ? 'var(--pc-cyan-glow)' : 'var(--pc-ink-soft)',
+                      }}
+                    >
+                      {tool.label}
+                    </span>
+                  )}
+                </button>
+              </span>
+            );
+          })}
+          {props.onAddCatalog && (
+            <button
+              type="button"
+              onClick={props.onAddCatalog}
+              aria-label="Yeni kategori veya eşya ekle"
+              title="Yeni kategori veya eşya ekle"
+              className="pc-tile pc-catalog-add-button"
+              style={{
+                width: compactExpanded ? 136 : 42,
+                height: 42,
+                minHeight: 42,
+                marginTop: 4,
+                padding: 0,
+                display: 'grid',
+                placeItems: 'center',
+                gridTemplateColumns: compactExpanded ? '20px 1fr' : undefined,
+                gap: compactExpanded ? 9 : 0,
+                borderRadius: 9,
+              }}
+            >
+              <span style={{ position: 'relative', left: compactExpanded ? 4 : 0 }}><Plus size={21} strokeWidth={2.4} /></span>
+              {compactExpanded && <span style={{ fontFamily: 'var(--pc-font-display)', fontSize: 9, fontWeight: 800, color: 'var(--pc-cyan-glow)' }}>EKLE</span>}
+            </button>
+          )}
+        </div>
+        {false && props.onAddCatalog && (
+          <button
+            type="button"
+            onClick={props.onAddCatalog}
+            aria-label="Yeni kategori veya eşya ekle"
+            title="Yeni kategori veya eşya ekle"
+            className="pc-tile pc-catalog-add-button"
+            style={{
+              position: 'absolute',
+              left: 6,
+              bottom: 6,
+              width: compactExpanded ? 136 : 42,
+              height: 42,
+              padding: 0,
+              display: 'none',
+              placeItems: 'center',
+              gridTemplateColumns: compactExpanded ? '20px 1fr' : undefined,
+              gap: compactExpanded ? 9 : 0,
+              borderRadius: 9,
+            }}
+          >
+            <Plus size={21} strokeWidth={2.4} />
+            {compactExpanded && <span style={{ fontFamily: 'var(--pc-font-display)', fontSize: 9, fontWeight: 800, color: 'var(--pc-cyan-glow)' }}>EKLE</span>}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="pointer-events-auto pc-glass pc-build-tools"
@@ -109,7 +264,7 @@ export function BuildToolsPanel(props: BuildToolsPanelProps): JSX.Element {
               {group}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
-              {TOOLS.filter((tool) => tool.group === group).map((tool) => {
+              {tools.filter((tool) => tool.group === group).map((tool) => {
                 const isActive =
                   props.active === tool.key || (tool.key === 'walls' && props.drawWallMode);
                 return (
@@ -131,7 +286,7 @@ export function BuildToolsPanel(props: BuildToolsPanelProps): JSX.Element {
                       overflow: 'hidden',
                     }}
                   >
-                    <Icon name={tool.icon} size={18} />
+                    {tool.categoryIcon ? <span aria-hidden style={{ fontSize: 17, lineHeight: 1 }}>{tool.categoryIcon}</span> : <Icon name={tool.icon} size={18} />}
                     <span
                       className="pc-build-tools-label"
                       style={{

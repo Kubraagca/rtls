@@ -90,6 +90,8 @@ export interface WallPaintPanelProps {
   onSelectedWallChange(wall: { id: string; kind: 'exterior' | 'interior' } | null): void;
   /** Open directly on the requested surface when launched from a contextual tool. */
   initialSurface?: Surface;
+  /** Lock the dialog to the surface that was right-clicked. */
+  surfaceOnly?: Surface;
   /** Hide wall controls when the panel is used as the 2D floor colour picker. */
   floorOnly?: boolean;
   onClose?(): void;
@@ -121,7 +123,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
       actions.setWallColor(target, color);
     }
   };
-  const [surface, setSurface] = useState<Surface>(props.initialSurface ?? 'walls');
+  const [surface, setSurface] = useState<Surface>(props.surfaceOnly ?? props.initialSurface ?? 'walls');
   const [wallGroup, setWallGroup] = useState<string>('corporate');
   const [floorGroup, setFloorGroup] = useState<string>('corporate');
 
@@ -177,7 +179,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
           <Icon name="sparkle" size={12} />
           Paint
         </div>
-        {!props.floorOnly && <SurfaceTabs surface={surface} onChange={setSurface} />}
+        {!props.floorOnly && !props.surfaceOnly && <SurfaceTabs surface={surface} onChange={setSurface} />}
         {props.onClose && (
           <button
             type="button"
@@ -192,7 +194,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
         )}
       </div>
 
-      {surface === 'walls' && !props.floorOnly ? (
+      {surface === 'walls' && !props.floorOnly && props.surfaceOnly !== 'floor' ? (
         <>
           <SectionLabel>Duvar deseni</SectionLabel>
           <PatternGrid>
@@ -241,6 +243,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
           />
 
           <SectionLabel>Wall Colour · {activeWallPalette.label}</SectionLabel>
+          <CurrentColorPreview value={currentWallColor} />
           <GroupTabs
             groups={WALL_PALETTES}
             active={wallGroup}
@@ -275,6 +278,7 @@ export function WallPaintPanel(props: WallPaintPanelProps): JSX.Element {
           />
 
           <SectionLabel>Floor Colour · {activeFloorPalette.label}</SectionLabel>
+          <CurrentColorPreview value={floor.floorColor} />
           <GroupTabs
             groups={FLOOR_PALETTES}
             active={floorGroup}
@@ -544,6 +548,48 @@ function SectionLabel({ children }: { children: React.ReactNode }): JSX.Element 
   );
 }
 
+function CurrentColorPreview({ value }: { value: string | undefined }): JSX.Element {
+  const color = value ?? '#ffffff';
+  const textColor = readableTextColor(color);
+  return (
+    <div
+      aria-label={`Selected colour ${color}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
+        minHeight: 24,
+        marginBottom: 4,
+        padding: '3px 7px',
+        borderRadius: 7,
+        background: color,
+        color: textColor,
+        border: '2px solid var(--pc-cyan-glow)',
+        boxShadow: '0 0 0 1px rgba(255,255,255,0.9), var(--pc-halo-cyan-soft)',
+        fontFamily: 'var(--pc-font-display)',
+        fontSize: 9,
+        fontWeight: 800,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+      }}
+    >
+      <span>Seçili renk</span>
+      <span>{color}</span>
+    </div>
+  );
+}
+
+function readableTextColor(color: string): string {
+  const match = color.trim().match(/^#([0-9a-f]{6})$/i);
+  if (!match) return '#1f2933';
+  const hex = match[1];
+  if (!hex) return '#1f2933';
+  const value = Number.parseInt(hex, 16);
+  const luminance = (0.299 * ((value >> 16) & 0xff) + 0.587 * ((value >> 8) & 0xff) + 0.114 * (value & 0xff)) / 255;
+  return luminance < 0.58 ? '#ffffff' : '#1f2933';
+}
+
 function PatternGrid({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <div
@@ -725,12 +771,16 @@ function SwatchGrid({ swatches, value, onChange, onCustomChange }: SwatchGridPro
               height: 22,
               borderRadius: 5,
               backgroundColor: swatch,
-              border: active ? '2px solid var(--pc-cyan-glow)' : '1px solid rgba(255,255,255,0.30)',
-              boxShadow: active ? 'var(--pc-halo-cyan-soft)' : 'inset 0 1px 0 rgba(255,255,255,0.40)',
+              border: active ? '3px solid #168cff' : '1px solid rgba(255,255,255,0.30)',
+              outline: active ? '2px solid #ffffff' : 'none',
+              boxShadow: active ? '0 0 0 1px #168cff, 0 0 10px rgba(22,140,255,0.75)' : 'inset 0 1px 0 rgba(255,255,255,0.40)',
               cursor: 'pointer',
               padding: 0,
+              position: 'relative',
             }}
-          />
+          >
+            {active && <span aria-hidden style={{ color: readableTextColor(swatch), fontSize: 14, fontWeight: 900, lineHeight: 1, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>✓</span>}
+          </button>
         );
       })}
       {onCustomChange && (

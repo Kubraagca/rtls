@@ -33,14 +33,16 @@ export function CatalogThumbnail({ item, size = 34 }: { item: CatalogItem; size?
     if (item.customThumbnail || !canvasRef.current) return undefined;
     setRendered(false);
     const canvas = canvasRef.current;
-    canvas.width = size + 18;
-    canvas.height = size + 8;
+    const thumbnailWidth = size + 18;
+    const thumbnailHeight = size + 8;
+    canvas.width = thumbnailWidth;
+    canvas.height = thumbnailHeight;
     if (!sharedRenderer) sharedRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' });
     const renderer = sharedRenderer;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(size + 18, size + 8, false);
+    renderer.setSize(thumbnailWidth, thumbnailHeight, false);
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(28, (size + 18) / (size + 8), 0.01, 100);
+    const camera = new THREE.PerspectiveCamera(28, thumbnailWidth / thumbnailHeight, 0.01, 100);
     camera.position.set(2.4, 1.7, 2.8);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x64748b, 2.2));
     const key = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -55,13 +57,17 @@ export function CatalogThumbnail({ item, size = 34 }: { item: CatalogItem; size?
       const bounds = new THREE.Box3().setFromObject(model);
       const dimensions = bounds.getSize(new THREE.Vector3());
       const longest = Math.max(dimensions.x, dimensions.y, dimensions.z, 0.01);
-      model.scale.setScalar(1.35 / longest);
+      // Use the tile area more effectively while retaining a small safety
+      // margin around the model.
+      model.scale.setScalar(1.48 / longest);
       const fitted = new THREE.Box3().setFromObject(model);
+      const fittedSize = fitted.getSize(new THREE.Vector3());
       const center = fitted.getCenter(new THREE.Vector3());
       model.position.sub(center);
-      model.position.y += fitted.getSize(new THREE.Vector3()).y / 2;
+      model.position.y += fittedSize.y / 2;
       scene.add(model);
-      camera.lookAt(0, 0.35, 0);
+      // A fixed target made tall furniture appear clipped at the top.
+      camera.lookAt(0, fittedSize.y / 2, 0);
       renderer.render(scene, camera);
       const context = canvas.getContext('2d');
       if (context) {

@@ -158,6 +158,20 @@ function buildCustomGlbPlaceholder({ THREE, item, hasCollision }: BuilderContext
   return group;
 }
 
+function buildCustomItem({ THREE, item, hasCollision }: BuilderContext): ReturnType<FurnitureBuilder> {
+  const group = new THREE.Group();
+  const geometry = new THREE.BoxGeometry(item.width, item.height, item.depth);
+  const material = new THREE.MeshStandardMaterial({
+    color: hasCollision ? 0xff5555 : item.color,
+    roughness: 0.72,
+    metalness: 0.04,
+  });
+  const box = new THREE.Mesh(geometry, material);
+  box.position.y = item.height / 2;
+  group.add(box);
+  return group;
+}
+
 
 export function createFurnitureModel(
   THREE: ThreeModule,
@@ -176,6 +190,8 @@ export function createFurnitureModel(
   // the editor never renders an empty placeholder while an asset is missing.
   const builder: FurnitureBuilder = item.type === 'custom-glb'
     ? buildCustomGlbPlaceholder
+    : item.type.startsWith('custom-item-')
+      ? buildCustomItem
     : item.type.startsWith('gltf-') || item.type === 'office-avatar' || item.type === 'female-office-avatar'
       ? buildEmpty
       : (BUILDERS[item.type] ?? buildEmpty);

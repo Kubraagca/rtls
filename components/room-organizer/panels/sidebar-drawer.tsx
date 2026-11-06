@@ -117,7 +117,7 @@ export function SidebarDrawer({
           overflow: 'hidden',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="pc-sidebar-header" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <SidebarTabs active={sidebarTab} onChange={setSidebarTab} />
           <button
             type="button"

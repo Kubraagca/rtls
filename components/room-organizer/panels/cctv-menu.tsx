@@ -41,7 +41,7 @@ export function CctvMenu({ variant, onAdd }: CctvMenuProps): JSX.Element {
 /** Dark, horizontal row of five type tiles for the bottom catalog strip. */
 function StripMenu({ onAdd }: { onAdd(item: CatalogItem): void }): JSX.Element {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
       {CCTV_TYPE_ORDER.map((type) => {
         const item = catalogItemForType(type);
         if (!item) return null;

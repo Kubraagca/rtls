@@ -93,7 +93,9 @@ export type FurnitureCategory =
   | 'outdoor'
   | 'people'
   | 'structure'
-  | 'office';
+  | 'office'
+  // User-created catalog categories use their own stable string keys.
+  | (string & {});
 
 export interface CategoryMeta {
   key: FurnitureCategory;
