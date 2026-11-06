@@ -28,7 +28,8 @@
             "x": -11.119609835797872,
             "z": 2.6548410073678994
           },
-          "rotation": 0
+          "rotation": 0,
+          "customModelUrl": "models/custom/masa_optimized.glb"
         },
         {
           "type": "glb-01af2111-c1c5-499b-a855-4c852e26cfa5",
@@ -52,7 +53,8 @@
             "x": -5.924285714285714,
             "z": 2.6548410073678994
           },
-          "rotation": 0
+          "rotation": 0,
+          "customModelUrl": "models/custom/masa_optimized.glb"
         },
         {
           "type": "glb-01af2111-c1c5-499b-a855-4c852e26cfa5",
@@ -76,7 +78,8 @@
             "x": -6.409293079608052,
             "z": -2.5
           },
-          "rotation": 0
+          "rotation": 0,
+          "customModelUrl": "models/custom/masa_optimized.glb"
         },
         {
           "type": "glb-01af2111-c1c5-499b-a855-4c852e26cfa5",
@@ -100,7 +103,8 @@
             "x": -11.11960983579787,
             "z": -2.5
           },
-          "rotation": 0
+          "rotation": 0,
+          "customModelUrl": "models/custom/masa_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -124,7 +128,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -148,7 +153,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -172,7 +178,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -196,7 +203,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -220,7 +228,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -244,7 +253,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -268,7 +278,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -292,7 +303,8 @@
           },
           "rotation": 3.141592653589793,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -316,7 +328,8 @@
           },
           "rotation": 0,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -340,7 +353,8 @@
           },
           "rotation": 0,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -364,7 +378,8 @@
           },
           "rotation": 0,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "glb-f0883e91-e13c-4629-bea2-a11a24b4cd9d",
@@ -388,7 +403,8 @@
           },
           "rotation": 0,
           "collisionWidth": 1.1,
-          "collisionDepth": 1.5
+          "collisionDepth": 1.5,
+          "customModelUrl": "models/custom/desk-chair_optimized.glb"
         },
         {
           "type": "filing-cabinet",

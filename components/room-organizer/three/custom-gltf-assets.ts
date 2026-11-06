@@ -185,8 +185,16 @@ export async function renderCustomGlbTopThumbnail(
 export function loadStoredCustomGltfAsset(id: string): Promise<ThreeNS.Object3D | null> {
   const cached = sourceCache.get(id);
   if (cached) return cached;
-  const promise = (id.startsWith('/')
-    ? fetch(id).then((response) => response.ok ? response.arrayBuffer() : null)
+  // Bundled custom models use a relative public path in the layout JSON. A
+  // document-relative URL keeps them working on localhost and under the
+  // GitHub Pages `/rtls/` base path, while opaque IDs still resolve from the
+  // browser-local IndexedDB store used by user uploads.
+  const isBundledAssetPath = id.startsWith('/') || id.startsWith('./') || id.startsWith('../') || id.includes('/');
+  const assetUrl = isBundledAssetPath && typeof document !== 'undefined'
+    ? new URL(id, document.baseURI).toString()
+    : null;
+  const promise = (assetUrl
+    ? fetch(assetUrl).then((response) => response.ok ? response.arrayBuffer() : null)
     : loadCustomGlbAssetData(id))
     .then((data) => (data ? parseGlb(data) : null))
     .then((gltf) => gltf?.scene ?? null)
