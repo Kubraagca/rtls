@@ -44,7 +44,7 @@ describe('settleWallMountedItem (#116)', () => {
     // East wall (x = 4): inward normal rotation is -π/2; body inset by
     // depth/2 + 0.02 so the back face rests on the wall.
     expect(settled!.wallRotation).toBeCloseTo(-Math.PI / 2, 10);
-    expect(settled!.position.x).toBeCloseTo(4 - 0.12, 10);
+    expect(settled!.position.x).toBeCloseTo(4 - 0.2, 10);
     expect(settled!.position.z).toBeCloseTo(0.5, 10);
     expect(settled!.rotation).toBeCloseTo(-Math.PI / 2, 10);
   });

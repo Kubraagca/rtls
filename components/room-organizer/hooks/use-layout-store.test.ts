@@ -8,7 +8,13 @@ import { layoutStore } from './use-layout-store';
 // layout-reducer.test.ts — here we just prove actions mutate the store's state.
 
 function reset(): void {
-  layoutStore.setState({ layout: INITIAL_LAYOUT, activeFloorIndex: 0 });
+  layoutStore.setState({
+    layout: {
+      ...INITIAL_LAYOUT,
+      floors: INITIAL_LAYOUT.floors.map((floor) => ({ ...floor, items: [] })),
+    },
+    activeFloorIndex: 0,
+  });
 }
 
 describe('use-layout-store — wiring', () => {
